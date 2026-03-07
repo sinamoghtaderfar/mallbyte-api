@@ -1,0 +1,64 @@
+mallbyte/                                  # Root project directory
+├── .env                                    # Environment variables
+├── .env.example                            # Example env file
+├── .gitignore                              # Git ignored files
+├── manage.py                               # Django management script
+├── README.md                               # Project documentation
+│
+├── requirements/                           # Dependency management
+│   ├── base.txt                            # Shared dependencies
+│   ├── development.txt                     # Development dependencies
+│   └── production.txt                      # Production dependencies
+│
+├── config/                                 # Project configuration
+│   ├── settings/                           # Django settings modules
+│   │   ├── base.py
+│   │   ├── development.py
+│   │   ├── production.py
+│   │   └── test.py
+│   │
+│   ├── urls.py                             # Main URL routing
+│   ├── api_urls.py                         # API routes
+│   │
+│   ├── asgi.py
+│   └── wsgi.py
+│
+├── apps/                                   # All Django apps (modules)
+│   ├── accounts/                           # User management
+│   ├── rbac/                               # Roles & permissions
+│   ├── products/                           # Product catalog
+│   ├── inventory/                          # Stock management
+│   ├── orders/                             # Cart & order system
+│   ├── payments/                           # Payment processing
+│   ├── discounts/                          # Coupons & flash sales
+│   ├── reviews/                            # Ratings & reviews
+│   ├── shipping/                           # Shipping system
+│   ├── content/                            # Blog & CMS
+│   ├── notifications/                      # Notification system
+│   ├── logs/                               # Activity logs
+│   └── returns/                            # Product returns
+│
+├── common/                                 # Shared components
+│   ├── base_models.py
+│   ├── mixins.py
+│   ├── fields.py
+│   └── constants.py
+│
+├── core/                                   # Core utilities
+│   ├── utils/
+│   ├── exceptions/
+│   ├── permissions/
+│   └── paginations/
+│
+├── media/                                  # Uploaded media files (dev)
+│
+├── templates/                              # Email templates
+│
+├── docs/                                   # Project documentation
+│   ├── api/
+│   ├── database/
+│   └── deployment/
+│
+├── scripts/                                # Helper scripts
+│
+└── logs/                                   # Application logs

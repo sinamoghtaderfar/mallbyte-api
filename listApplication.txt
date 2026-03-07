@@ -1,0 +1,14 @@
+# python manage.py startapp <name> ./apps/<name>
+python manage.py startapp accounts ./apps/accounts
+python manage.py startapp rbac ./apps/rbac
+python manage.py startapp products ./apps/products
+python manage.py startapp inventory ./apps/inventory
+python manage.py startapp orders ./apps/orders
+python manage.py startapp payments ./apps/payments
+python manage.py startapp discounts ./apps/discounts
+python manage.py startapp reviews ./apps/reviews
+python manage.py startapp shipping ./apps/shipping
+python manage.py startapp content ./apps/content
+python manage.py startapp notifications ./apps/notifications
+python manage.py startapp logs ./apps/logs
+python manage.py startapp returns ./apps/returns

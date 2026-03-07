@@ -1,0 +1,30 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.pyd
+*.env
+venv/
+.env/
+*.swp
+setupfarsi.txt
+
+# Django
+*.sqlite3
+/db.sqlite3
+/media/
+staticfiles/
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
