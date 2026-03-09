@@ -1,7 +1,9 @@
 [tool.ruff]
-line-length = 88
-target-version = "py313"
-
+line-length = 320
+target-version = "py312"
+exclude = [
+    "apps/**/migrations",
+]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4"]
 

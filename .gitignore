@@ -28,3 +28,4 @@ staticfiles/
 Thumbs.db
 
 
+.ruff_cache
