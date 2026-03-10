@@ -81,3 +81,36 @@ class User(AbstractUser):
     # String representation of the user
     def __str__(self):
         return f"{self.full_name} - {self.phone}"
+
+
+class Profile(models.Model):
+    """User profile model"""
+
+    GENDER_CHOICES = [
+        ("M", "Male"),
+        ("F", "Female"),
+        ("O", "Other"),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile", verbose_name="User")
+
+    avatar = models.ImageField(upload_to="avatars/", null=True, blank=True, verbose_name="Avatar")
+    birth_date = models.DateField(null=True, blank=True, verbose_name="Birth Date")
+    gender = models.CharField(
+        max_length=1,
+        choices=GENDER_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name="Gender",
+    )
+    national_code = models.CharField(max_length=10, null=True, blank=True, verbose_name="National Code")
+    loyalty_points = models.IntegerField(default=0, verbose_name="Loyalty Points")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+
+    class Meta:
+        verbose_name = "Profile"
+        verbose_name_plural = "Profiles"
+
+    def __str__(self):
+        return f"{self.user.full_name}'s Profile"
