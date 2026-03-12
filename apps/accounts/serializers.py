@@ -1,7 +1,8 @@
-from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from .models import Profile
+from rest_framework import serializers
+
+from .models import Address, Profile
 
 User = get_user_model()
 
@@ -18,7 +19,9 @@ class UserSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     """Serializer for registering a new user"""
 
-    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+    password = serializers.CharField(
+        write_only=True, required=True, validators=[validate_password]
+    )
     password2 = serializers.CharField(write_only=True, required=True)
 
     class Meta:
@@ -55,3 +58,43 @@ class ProfileSerializer(serializers.ModelSerializer):
             "loyalty_points",
         ]
         read_only_fields = ["id", "user", "loyalty_points"]
+
+
+class AddressSerializer(serializers.ModelSerializer):
+    """Serializer for user addresses"""
+
+    class Meta:
+        model = Address
+        fields = [
+            "id",
+            "user",
+            "title",
+            "province",
+            "city",
+            "street",
+            "alley",
+            "building_number",
+            "floor",
+            "unit",
+            "postal_code",
+            "receiver_name",
+            "receiver_phone",
+            "is_default",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+    def validate_postal_code(self, value):
+        """Validate postal code (10 digits)"""
+        if not value.isdigit() or len(value) != 10:
+            raise serializers.ValidationError("Postal code must be exactly 10 digits")
+        return value
+
+    def validate_receiver_phone(self, value):
+        """Validate phone number (11 digits starting with 09)"""
+        if not value.isdigit() or len(value) != 11 or not value.startswith("09"):
+            raise serializers.ValidationError(
+                "Phone number must be 11 digits starting with 09"
+            )
+        return value
