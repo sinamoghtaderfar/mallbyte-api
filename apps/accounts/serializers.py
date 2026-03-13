@@ -1,3 +1,4 @@
+import re
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
@@ -97,4 +98,35 @@ class AddressSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Phone number must be 11 digits starting with 09"
             )
+        return value
+
+
+class OTPRequestSerializer(serializers.Serializer):
+    """Serializer for requesting OTP"""
+    phone = serializers.CharField(max_length = 15)
+    
+    
+    def validate_phone(self, value):
+        """Validate phone number"""
+        cleaned = re.sub(r'[\s\-\(\)]', '', value)
+        
+        pattern = r'^\+\d{1,3}\d{4,14}$'
+        if not re.match(pattern, cleaned):
+            raise serializers.ValidationError(
+                "Phone must be in international format: +[country code][number] (e.g., +989121234567)"
+            )
+        
+        return cleaned
+    
+    
+
+class OTPVerifySerializer(serializers.Serializer):
+    """Serializer for verifying OTP"""
+    phone = serializers.CharField(max_length = 15)
+    code = serializers.CharField(max_length=6)
+    
+    def validate_code(self, value):
+        """Validate code is 6 digits"""
+        if not value.isdigit() or len(value) != 6:
+            raise serializers.ValidationError("Code must be 6 digits")
         return value

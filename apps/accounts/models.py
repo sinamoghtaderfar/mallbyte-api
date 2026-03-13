@@ -1,6 +1,9 @@
+import random
+from django.utils import timezone
+from datetime import timedelta
+
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
-
 
 class UserManager(BaseUserManager):
     def create_user(self, phone, email, full_name, password=None, **extra_fields):
@@ -37,7 +40,7 @@ class User(AbstractUser):
     username = None
 
     # Unique phone for login
-    phone = models.CharField(max_length=11, unique=True, verbose_name="Phone Number")
+    phone = models.CharField(max_length=15, unique=True, verbose_name="Phone Number")
 
     # Unique email
     email = models.EmailField(unique=True, verbose_name="Email")
@@ -169,3 +172,73 @@ class Address(models.Model):
                 is_default=False
             )
         super().save(*args, **kwargs)
+
+
+import random
+from django.utils import timezone
+from datetime import timedelta
+
+class OTP(models.Model):
+    """One-time password for phone verification"""
+    phone = models.CharField(max_length=15, verbose_name="Phone Number")
+    code = models.CharField(max_length=6, verbose_name="Verification Code")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(verbose_name="Expires At")
+    is_used = models.BooleanField(default=False, verbose_name="Is Used")
+    
+    class Meta:
+        verbose_name = "OTP"
+        verbose_name_plural = "OTPs"
+        indexes = [
+            models.Index(fields=['phone', 'created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.phone} - {self.code} - {'Used' if self.is_used else 'Active'}"
+    
+    @property
+    def is_expired(self):
+        """Check if OTP is expired"""
+        return timezone.now() > self.expires_at
+    
+    @classmethod
+    def generate_otp(cls, phone):
+        """Generate a new OTP for phone number"""
+        # Expire old OTPs for this phone
+        cls.objects.filter(phone=phone, is_used=False).update(is_used=True)
+        
+        # Generate 6-digit code
+        code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Set expiry to 2 minutes from now
+        expires_at = timezone.now() + timedelta(minutes=2)
+        
+        # Create and return new OTP
+        otp = cls.objects.create(
+            phone=phone,
+            code=code,
+            expires_at=expires_at
+        )
+        return otp
+    
+    @classmethod
+    def verify_otp(cls, phone, code):
+        """Verify OTP code for phone number"""
+        try:
+            otp = cls.objects.filter(
+                phone=phone,
+                code=code,
+                is_used=False
+            ).latest('created_at')
+            
+            if otp.is_expired:
+                return False, "OTP has expired"
+            
+            # Mark as used
+            otp.is_used = True
+            otp.save()
+            
+            return True, "OTP verified successfully"
+            
+        except cls.DoesNotExist:
+            return False, "Invalid OTP code"
