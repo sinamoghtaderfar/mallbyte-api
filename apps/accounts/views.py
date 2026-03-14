@@ -1,17 +1,22 @@
 from django.contrib.auth import get_user_model
+from django.http import Http404
+
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-
-from .models import Address, Profile, OTP
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework import serializers
+from .models import Address, Profile, OTP, Seller
 from .serializers import (
     AddressSerializer,
     ProfileSerializer,
     RegisterSerializer,
     UserSerializer,
     OTPRequestSerializer,
-    OTPVerifySerializer
+    OTPVerifySerializer,
+    SellerApplicationSerializer, SellerSerializer, 
+    SellerUpdateSerializer, AdminSellerActionSerializer
 )
 
 User = get_user_model()
@@ -147,3 +152,137 @@ class OTPVerifyView(generics.GenericAPIView):
             'access': str(refresh.access_token),
             'is_new': created
         }, status=status.HTTP_200_OK)
+        
+class SellerApplyView(generics.CreateAPIView):
+    """Apply to become a seller"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = SellerApplicationSerializer
+    #parser_classes = [MultiPartParser, FormParser]
+
+    def perform_create(self, serializer):
+        # Check if user already has a seller profile
+        if hasattr(self.request.user, 'seller'):
+            raise serializers.ValidationError(
+                {"error": "You already have a seller profile"}
+            )
+        
+        serializer.save(user=self.request.user)
+        
+class SellerStatusView(generics.RetrieveAPIView):
+    """Check seller application status"""
+    
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = SellerSerializer
+    
+    def get_object(self):
+        try:
+            return self.request.user.seller
+        
+        except Seller.DoesNotExist:
+            
+            raise Http404("No seller profile found")
+
+            
+            
+class IsSellerPermission(permissions.BasePermission):
+    """Permission check for verified sellers"""
+    
+    def has_permission(self, request, view):
+        return(
+            request.user.is_authenticated and 
+            hasattr(request.user, 'seller') and 
+            request.user.seller.is_verified
+        )
+        
+class SellerDashboardView(generics.RetrieveAPIView):
+    """Seller dashboard with stats"""
+    permission_classes = [IsSellerPermission]
+    serializer_class = SellerSerializer
+
+    def get_object(self):
+        return self.request.user.seller
+
+
+class SellerStoreView(generics.RetrieveUpdateAPIView):
+    """View and update store information"""
+    permission_classes = [IsSellerPermission]
+    serializer_class = SellerUpdateSerializer
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_object(self):
+        return self.request.user.seller
+
+
+class AdminSellersListView(generics.ListAPIView):
+    """Admin: List all sellers with filters"""
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = SellerSerializer
+
+    def get_queryset(self):
+        queryset = Seller.objects.all()
+        
+        # Filter by status
+        status = self.request.query_params.get('status')
+        if status:
+            queryset = queryset.filter(status=status)
+        
+        # Search by store name
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(store_name__icontains=search)
+        
+        return queryset.order_by('-applied_at')
+
+
+class AdminSellerDetailView(generics.RetrieveAPIView):
+    """Admin: View seller details"""
+    permission_classes = [permissions.IsAdminUser]
+    queryset = Seller.objects.all()
+    serializer_class = SellerSerializer
+
+
+class AdminSellerVerifyView(generics.GenericAPIView):
+    """Admin: Verify seller"""
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdminSellerActionSerializer
+
+    def post(self, request, pk):
+        try:
+            seller = Seller.objects.get(pk=pk)
+        except Seller.DoesNotExist:
+            return Response(
+                {"error": "Seller not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        seller.approve(request.user)
+        return Response(
+            {"message": f"Seller {seller.store_name} approved successfully"},
+            status=status.HTTP_200_OK
+        )
+
+
+class AdminSellerRejectView(generics.GenericAPIView):
+    """Admin: Reject seller"""
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdminSellerActionSerializer
+
+    def post(self, request, pk):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            seller = Seller.objects.get(pk=pk)
+        except Seller.DoesNotExist:
+            return Response(
+                {"error": "Seller not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        reason = serializer.validated_data.get('reason', '')
+        seller.reject(request.user, reason)
+        
+        return Response(
+            {"message": f"Seller {seller.store_name} rejected"},
+            status=status.HTTP_200_OK
+        )

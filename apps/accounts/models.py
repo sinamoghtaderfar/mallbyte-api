@@ -242,3 +242,192 @@ class OTP(models.Model):
             
         except cls.DoesNotExist:
             return False, "Invalid OTP code"
+        
+class Seller(models.Model):
+    """Seller information for multi-vendor marketplace"""
+
+    class StatusChoices(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+        SUSPENDED = 'suspended', 'Temporarily Suspended'
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="seller",
+        verbose_name="User"
+    )
+
+    store_name = models.CharField(
+        max_length=100,
+        unique=True,
+        verbose_name="Store Name"
+    )
+
+    store_slug = models.SlugField(
+        max_length=120,
+        unique=True,
+        verbose_name="Store Slug"
+    )
+
+    logo = models.ImageField(
+        upload_to='sellers/logos/',
+        null=True,
+        blank=True,
+        verbose_name="Logo"
+    )
+
+    banner = models.ImageField(
+        upload_to='sellers/banners/',
+        null=True,
+        blank=True,
+        verbose_name="Banner"
+    )
+
+    description = models.TextField(
+        max_length=500,
+        blank=True,
+        verbose_name="Store Description"
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=StatusChoices.choices,
+        default=StatusChoices.PENDING,
+        verbose_name="Status"
+    )
+    
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_sellers',
+        verbose_name="Verified By"
+    )
+    
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Verified At"
+    )
+    
+    rejection_reason = models.TextField(
+        blank=True,
+        verbose_name="Rejection Reason"
+    )
+    
+     # Contact & Business info
+    business_phone = models.CharField(
+        max_length=15,
+        verbose_name="Business Phone"
+    )
+    business_email = models.EmailField(
+        verbose_name="Business Email"
+    )
+    website = models.URLField(
+        blank=True,
+        verbose_name="Website"
+    )
+    
+    # Bank info (store as JSON for flexibility)
+    bank_info = models.JSONField(
+        default=dict,
+        verbose_name="Bank Information",
+        help_text="Store bank account details as JSON"
+    )
+    
+    # Documents (store paths as JSON)
+    documents = models.JSONField(
+        default=list,
+        verbose_name="Documents",
+        help_text="List of uploaded document paths"
+    )
+    
+    # Financial
+    commission_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=10.00,
+        verbose_name="Commission Rate (%)",
+        help_text="Percentage taken by platform"
+    )
+    
+    total_sales = models.DecimalField(
+        max_digits=12,
+        decimal_places=0,
+        default=0,
+        verbose_name="Total Sales"
+    )
+    total_orders = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Total Orders"
+    )
+    balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=0,
+        default=0,
+        verbose_name="Current Balance"
+    )
+    
+    # Timestamps
+    applied_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Applied At"
+    )
+    
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Created At"
+    )
+    
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="Updated At"
+    )
+    
+    class Meta:
+        verbose_name = "Seller"
+        verbose_name_plural = "Sellers"
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['store_slug']),
+            models.Index(fields=['-total_sales']),
+        ]
+    def __str__(self):
+        return f"{self.store_name} - {self.get_status_display()}"
+    
+    def save(self, *args, **kwargs):
+        # Auto-generate slug from store name if not provided
+        if not self.store_slug:
+            from django.utils.text import slugify
+            base_slug = slugify(self.store_name)
+            slug = base_slug
+            counter = 1
+            while Seller.objects.filter(store_slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.store_slug = slug
+        super().save(*args, **kwargs)
+    
+    def approve(self, admin_user):
+        """Approve seller application"""
+        self.status = self.StatusChoices.APPROVED
+        self.verified_by = admin_user
+        self.verified_at = timezone.now()
+        self.save()
+        
+        # Add seller role to user (when we have RBAC)
+        # TODO: Add role assignment
+    
+    def reject(self, admin_user, reason):
+        """Reject seller application"""
+        self.status = self.StatusChoices.REJECTED
+        self.verified_by = admin_user
+        self.rejection_reason = reason
+        self.save()
+    
+    @property
+    def is_verified(self):
+        return self.status == self.StatusChoices.APPROVED

@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .models import Address, Profile
+from .models import Address, Profile, Seller
 
 User = get_user_model()
 
@@ -130,3 +130,54 @@ class OTPVerifySerializer(serializers.Serializer):
         if not value.isdigit() or len(value) != 6:
             raise serializers.ValidationError("Code must be 6 digits")
         return value
+    
+    
+class SellerApplicationSerializer(serializers.ModelSerializer):
+    """Serializer for applying to become a seller"""
+    
+    class Meta:
+        model = Seller
+        fields = [
+            'store_name', 'description', 'business_phone', 
+            'business_email', 'website', 'bank_info', 'documents'
+        ]
+        
+    def validate_store_name(self, value):
+        if Seller.objects.filter(store_name=value).exists():
+            raise serializers.ValidationError("This store name is already taken")
+        return value
+
+class SellerSerializer(serializers.ModelSerializer):
+    """Serializer for seller details"""
+
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model= Seller
+        fields = [
+            'id', 'user', 'store_name', 'store_slug', 'logo', 'banner',
+            'description', 'status', 'verified_at', 'business_phone',
+            'business_email', 'website', 'commission_rate', 'total_sales',
+            'total_orders', 'balance', 'applied_at', 'created_at'
+        ]
+        read_only_fields = [
+            'id', 'user', 'store_slug', 'status', 'verified_at',
+            'commission_rate', 'total_sales', 'total_orders', 'balance',
+            'applied_at', 'created_at'
+        ]
+        
+class SellerUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for sellers to update their info"""
+    
+    class Meta:
+        model = Seller
+        fields = [
+            'logo', 'banner', 'description', 'business_phone',
+            'business_email', 'website', 'bank_info'
+        ]
+
+class AdminSellerActionSerializer(serializers.Serializer):
+    """Serializer for admin actions on sellers"""
+    
+    reason = serializers.CharField(required=False, allow_blank=True)
+    

@@ -2,11 +2,17 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from .views import AddressViewSet, ProfileView, RegisterView, OTPRequestView, OTPVerifyView
+from .views import (
+    RegisterView, ProfileView, AddressViewSet,
+    OTPRequestView, OTPVerifyView,
+    SellerApplyView, SellerStatusView, SellerDashboardView,
+    SellerStoreView, AdminSellersListView, AdminSellerDetailView,
+    AdminSellerVerifyView, AdminSellerRejectView
+)
 
 # Create a router for viewsets
 router = DefaultRouter()
-router.register("addresses", AddressViewSet, basename="address")  # اینجا درسته
+router.register("addresses", AddressViewSet, basename="address")  
 
 urlpatterns = [
     # JWT endpoints
@@ -20,6 +26,18 @@ urlpatterns = [
     # User endpoints
     path("register/", RegisterView.as_view(), name="register"),
     path("profile/", ProfileView.as_view(), name="profile"),
+    
+    # Seller endpoints
+    path('seller/apply/', SellerApplyView.as_view(), name='seller_apply'),
+    path('seller/status/', SellerStatusView.as_view(), name='seller_status'),
+    path('seller/dashboard/', SellerDashboardView.as_view(), name='seller_dashboard'),
+    path('seller/store/', SellerStoreView.as_view(), name='seller_store'),
+    
+    # Admin endpoints
+    path('admin/sellers/', AdminSellersListView.as_view(), name='admin_sellers_list'),
+    path('admin/sellers/<int:pk>/', AdminSellerDetailView.as_view(), name='admin_seller_detail'),
+    path('admin/sellers/<int:pk>/verify/', AdminSellerVerifyView.as_view(), name='admin_seller_verify'),
+    path('admin/sellers/<int:pk>/reject/', AdminSellerRejectView.as_view(), name='admin_seller_reject'),
     # Include router URLs
     path("", include(router.urls)),
 ]
