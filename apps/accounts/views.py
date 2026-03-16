@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import serializers
+from .permissions import IsAdminOrVendorManager
 from .models import Address, Profile, OTP, Seller
 from .serializers import (
     AddressSerializer,
@@ -268,6 +269,8 @@ class AdminSellerRejectView(generics.GenericAPIView):
     serializer_class = AdminSellerActionSerializer
 
     def post(self, request, pk):
+        print(f"\n🔴 REJECT VIEW CALLED for seller {pk}")
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
@@ -281,8 +284,56 @@ class AdminSellerRejectView(generics.GenericAPIView):
         
         reason = serializer.validated_data.get('reason', '')
         seller.reject(request.user, reason)
-        
+        print(f"   Status after reject: {seller.status}")
         return Response(
             {"message": f"Seller {seller.store_name} rejected"},
             status=status.HTTP_200_OK
         )
+        
+class AdminVerifySellerView(generics.GenericAPIView):
+    """
+    Admin view to verify or reject seller applications.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrVendorManager]
+    serializer_class = AdminSellerActionSerializer
+    
+    def post(self, request, seller_id):
+        try:
+            seller = Seller.objects.get(id=seller_id, status = "pending")
+        except Seller.DoesNotExist:
+            return Response(
+                {"error": "Pending seller not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        action = request.data.get("action")
+        reason = request.data.get("reason", "")
+        
+        if action == 'approve':
+            seller.approve(request.user)
+            return Response({
+                "message": f"Seller {seller.store_name} approved successfully",
+                "seller": SellerSerializer(seller).data
+            }, status=status.HTTP_200_OK)
+
+        elif action == 'reject':
+            seller.reject(request.user, reason)
+            return Response({
+                "message": f"Seller {seller.store_name} rejected",
+                "seller": SellerSerializer(seller).data
+            }, status=status.HTTP_200_OK)
+
+        else:
+            return Response(
+                {"error": "Action must be 'approve' or 'reject'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class AdminPendingSellersView(generics.ListAPIView):
+    """
+    Admin view to list all pending seller applications.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrVendorManager]
+    serializer_class = SellerSerializer
+
+    def get_queryset(self):
+        return Seller.objects.filter(status='pending').order_by('-applied_at')

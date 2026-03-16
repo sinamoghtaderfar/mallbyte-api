@@ -7,7 +7,8 @@ from .views import (
     OTPRequestView, OTPVerifyView,
     SellerApplyView, SellerStatusView, SellerDashboardView,
     SellerStoreView, AdminSellersListView, AdminSellerDetailView,
-    AdminSellerVerifyView, AdminSellerRejectView
+    AdminSellerVerifyView, AdminSellerRejectView,
+    AdminPendingSellersView, AdminVerifySellerView,
 )
 
 # Create a router for viewsets
@@ -38,6 +39,10 @@ urlpatterns = [
     path('admin/sellers/<int:pk>/', AdminSellerDetailView.as_view(), name='admin_seller_detail'),
     path('admin/sellers/<int:pk>/verify/', AdminSellerVerifyView.as_view(), name='admin_seller_verify'),
     path('admin/sellers/<int:pk>/reject/', AdminSellerRejectView.as_view(), name='admin_seller_reject'),
+    
+    # Admin seller management
+    path('admin/sellers/pending/', AdminPendingSellersView.as_view(), name='admin_pending_sellers'),
+    path('admin/sellers/<int:seller_id>/verify/', AdminVerifySellerView.as_view(), name='admin_verify_seller'),
     # Include router URLs
     path("", include(router.urls)),
 ]

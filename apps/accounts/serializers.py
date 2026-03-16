@@ -141,7 +141,7 @@ class SellerApplicationSerializer(serializers.ModelSerializer):
             'store_name', 'description', 'business_phone', 
             'business_email', 'website', 'bank_info', 'documents'
         ]
-        
+        read_only_fields = ['id']
     def validate_store_name(self, value):
         if Seller.objects.filter(store_name=value).exists():
             raise serializers.ValidationError("This store name is already taken")
@@ -181,3 +181,9 @@ class AdminSellerActionSerializer(serializers.Serializer):
     
     reason = serializers.CharField(required=False, allow_blank=True)
     
+class AdminSellerActionSerializer(serializers.Serializer):
+    """
+    Serializer for admin actions on sellers.
+    """
+    action = serializers.ChoiceField(choices=['approve', 'reject'])
+    reason = serializers.CharField(required=False, allow_blank=True)
