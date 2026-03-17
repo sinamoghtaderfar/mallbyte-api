@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.http import Http404
+from django.contrib.auth.hashers import check_password
 
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -11,6 +12,9 @@ from .permissions import IsAdminOrVendorManager
 from .models import Address, Profile, OTP, Seller
 from .serializers import (
     AddressSerializer,
+    ChangePasswordSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetVerifySerializer,
     ProfileSerializer,
     RegisterSerializer,
     UserSerializer,
@@ -269,7 +273,7 @@ class AdminSellerRejectView(generics.GenericAPIView):
     serializer_class = AdminSellerActionSerializer
 
     def post(self, request, pk):
-        print(f"\n🔴 REJECT VIEW CALLED for seller {pk}")
+        print(f"\nREJECT VIEW CALLED for seller {pk}")
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -337,3 +341,93 @@ class AdminPendingSellersView(generics.ListAPIView):
 
     def get_queryset(self):
         return Seller.objects.filter(status='pending').order_by('-applied_at')
+    
+class PasswordResetRequestView(generics.CreateAPIView):
+    """Request password reset via OTP"""
+    permission_classes = [permissions.AllowAny]
+    serializer_class = PasswordResetRequestSerializer
+    
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception = True)
+        
+        phone = serializer.validated_data['phone']
+        
+        # Check if user exists
+        try:
+            user = User.objects.get(phone=phone)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "No user found with this phone number"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        # Generate OTP
+        otp = OTP.generate_otp(phone)
+        print(f"\n📱 Password reset OTP for {phone}: {otp.code}\n")
+        
+        return Response({
+            'message': 'OTP sent successfully',
+            'expires_in': 120
+        }, status=status.HTTP_200_OK)
+        
+class PasswordResetVerifyView(generics.GenericAPIView):
+    """Verify OTP and reset password"""
+    
+    permission_classes = [permissions.AllowAny]
+    serializer_class = PasswordResetVerifySerializer
+    
+    def post(self, request):
+        serializer = self. get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        phone = serializer.validated_data['phone']
+        code = serializer.validated_data['code']
+        new_password = serializer.validated_data['new_password']
+        
+        # Verify OTP
+        success, message = OTP.verify_otp(phone, code)
+        
+        if not success:
+            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get user and set new password
+        try:
+            user = User.objects.get(phone=phone)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({
+            'message': 'Password reset successful'
+        }, status=status.HTTP_200_OK)
+        
+class ChangePasswordView(generics.GenericAPIView):
+    """Change password for authenticated user"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChangePasswordSerializer
+    
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = request.user
+        old_password = serializer.validated_data['old_password']
+        new_password = serializer.validated_data['new_password']
+        
+         # Check old password
+        if not user.check_password(old_password):
+            return Response(
+                {"old_password": "Wrong password"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Set new password
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({
+            'message': 'Password changed successfully'
+        }, status=status.HTTP_200_OK)

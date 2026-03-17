@@ -9,6 +9,7 @@ from .views import (
     SellerStoreView, AdminSellersListView, AdminSellerDetailView,
     AdminSellerVerifyView, AdminSellerRejectView,
     AdminPendingSellersView, AdminVerifySellerView,
+    PasswordResetRequestView, PasswordResetVerifyView, ChangePasswordView,
 )
 
 # Create a router for viewsets
@@ -43,6 +44,15 @@ urlpatterns = [
     # Admin seller management
     path('admin/sellers/pending/', AdminPendingSellersView.as_view(), name='admin_pending_sellers'),
     path('admin/sellers/<int:seller_id>/verify/', AdminVerifySellerView.as_view(), name='admin_verify_seller'),
+    
+    # Password reset
+    path('password-reset/request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
+    path('password-reset/verify/', PasswordResetVerifyView.as_view(), name='password_reset_verify'),
+    
+    # Change password
+    path('change-password/', ChangePasswordView.as_view(), name='change_password'),
+    
+    
     # Include router URLs
     path("", include(router.urls)),
 ]

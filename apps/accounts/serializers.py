@@ -187,3 +187,47 @@ class AdminSellerActionSerializer(serializers.Serializer):
     """
     action = serializers.ChoiceField(choices=['approve', 'reject'])
     reason = serializers.CharField(required=False, allow_blank=True)
+    
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for requesting password reset"""
+    phone = serializers.CharField(max_length = 15)
+    
+    def validate_phone(self, value):
+        #remove space -
+        cleaned = re.sub(r'[\s\-\(\)]', '', value)
+        
+        pattern = r'^\+\d{1,3}\d{4,14}$'
+        
+        if not re.match(pattern, cleaned):
+            raise serializers.ValidationError(
+                "Phone must be in international format: +[country code][number]"
+            )
+        return cleaned
+
+class PasswordResetVerifySerializer(serializers.Serializer):
+    """Serializer for verifying OTP and resetting password"""
+    phone = serializers.CharField(max_length = 15)
+    code = serializers.CharField(max_length = 6)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    confirm_password = serializers.CharField(write_only=True, min_length=8)
+    
+    def validate_code(self, value):
+        if not value.isdigit() or len(value) !=6:
+            raise serializers.ValidationError("Code must be 6 digits")
+        return value
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError({"new_password": "Passwords don't match"})
+        return attrs
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for changing password (when logged in)"""
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    confirm_password = serializers.CharField(write_only=True, min_length=8)
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError({"new_password": "Passwords don't match"})
+        return attrs
