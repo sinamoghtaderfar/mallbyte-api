@@ -1,0 +1,222 @@
+[
+  {
+    "model": "rbac.permission",
+    "pk": 1,
+    "fields": {
+      "name": "Approve Seller",
+      "codename": "approve_seller",
+      "module": "accounts",
+      "description": "Can approve or reject seller applications",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 2,
+    "fields": {
+      "name": "View All Sellers",
+      "codename": "view_all_sellers",
+      "module": "accounts",
+      "description": "Can view all seller applications",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 3,
+    "fields": {
+      "name": "Manage Roles",
+      "codename": "manage_roles",
+      "module": "rbac",
+      "description": "Can create, edit, delete roles",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 4,
+    "fields": {
+      "name": "Assign Roles",
+      "codename": "assign_roles",
+      "module": "rbac",
+      "description": "Can assign roles to users",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 5,
+    "fields": {
+      "name": "Manage Blog",
+      "codename": "manage_blog",
+      "module": "content",
+      "description": "Can create, edit, delete blog posts",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 6,
+    "fields": {
+      "name": "Manage Banners",
+      "codename": "manage_banners",
+      "module": "content",
+      "description": "Can create, edit, delete banners",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 7,
+    "fields": {
+      "name": "Manage FAQ",
+      "codename": "manage_faq",
+      "module": "content",
+      "description": "Can create, edit, delete FAQs",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 8,
+    "fields": {
+      "name": "Approve Product",
+      "codename": "approve_product",
+      "module": "products",
+      "description": "Can approve or reject products",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 9,
+    "fields": {
+      "name": "Manage Categories",
+      "codename": "manage_categories",
+      "module": "products",
+      "description": "Can create, edit, delete categories",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 10,
+    "fields": {
+      "name": "Add Product",
+      "codename": "add_product",
+      "module": "products",
+      "description": "Can add new products",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 11,
+    "fields": {
+      "name": "Edit Own Product",
+      "codename": "edit_own_product",
+      "module": "products",
+      "description": "Can edit own products",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 12,
+    "fields": {
+      "name": "Delete Own Product",
+      "codename": "delete_own_product",
+      "module": "products",
+      "description": "Can delete own products",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 13,
+    "fields": {
+      "name": "View All Orders",
+      "codename": "view_all_orders",
+      "module": "orders",
+      "description": "Can view all orders",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 14,
+    "fields": {
+      "name": "View Own Orders",
+      "codename": "view_own_orders",
+      "module": "orders",
+      "description": "Can view own orders only",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 15,
+    "fields": {
+      "name": "Manage Orders",
+      "codename": "manage_orders",
+      "module": "orders",
+      "description": "Can update order status",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 16,
+    "fields": {
+      "name": "Create Discount",
+      "codename": "create_discount",
+      "module": "discounts",
+      "description": "Can create discount codes",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 17,
+    "fields": {
+      "name": "Manage Flash Sales",
+      "codename": "manage_flash_sales",
+      "module": "discounts",
+      "description": "Can create and manage flash sales",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 18,
+    "fields": {
+      "name": "View Admin Dashboard",
+      "codename": "view_admin_dashboard",
+      "module": "accounts",
+      "description": "Can access admin dashboard",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 19,
+    "fields": {
+      "name": "View Reports",
+      "codename": "view_reports",
+      "module": "accounts",
+      "description": "Can view system reports",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.permission",
+    "pk": 20,
+    "fields": {
+      "name": "Manage Settings",
+      "codename": "manage_settings",
+      "module": "accounts",
+      "description": "Can change system settings",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  }
+]

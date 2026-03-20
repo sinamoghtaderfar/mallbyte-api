@@ -1,0 +1,74 @@
+[
+  {
+    "model": "rbac.role",
+    "pk": 1,
+    "fields": {
+      "name": "super_admin",
+      "description": "Super Administrator - Full system access",
+      "level": 100,
+      "is_system_role": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.role",
+    "pk": 2,
+    "fields": {
+      "name": "vendor_manager",
+      "description": "Vendor Manager - Can approve/reject vendors",
+      "level": 80,
+      "is_system_role": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.role",
+    "pk": 3,
+    "fields": {
+      "name": "content_admin",
+      "description": "Content Admin - Can manage blog, banners, FAQs",
+      "level": 70,
+      "is_system_role": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.role",
+    "pk": 4,
+    "fields": {
+      "name": "product_admin",
+      "description": "Product Admin - Can approve products",
+      "level": 70,
+      "is_system_role": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.role",
+    "pk": 5,
+    "fields": {
+      "name": "vendor",
+      "description": "Vendor - Can manage own products and orders",
+      "level": 50,
+      "is_system_role": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  },
+  {
+    "model": "rbac.role",
+    "pk": 6,
+    "fields": {
+      "name": "customer",
+      "description": "Customer - Can browse and purchase",
+      "level": 10,
+      "is_system_role": true,
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T00:00:00Z"
+    }
+  }
+]
