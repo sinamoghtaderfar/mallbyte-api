@@ -28,6 +28,7 @@ urlpatterns = [
     path(
         "swagger/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"
     ),
+    path('api/rbac/', include('apps.rbac.urls')),
 ]
 
 
