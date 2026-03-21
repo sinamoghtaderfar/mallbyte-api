@@ -1,7 +1,6 @@
 import random
 from django.utils import timezone
 from datetime import timedelta
-
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
@@ -70,7 +69,14 @@ class User(AbstractUser):
         related_name="custom_user_set",  # changed from default 'user_set'
         related_query_name="custom_user_permissions",
     )
-
+    roles = models.ManyToManyField(
+        'rbac.Role',
+        through='rbac.UserRole',
+        through_fields=('user', 'role'),
+        related_name='users',
+        blank=True,
+        verbose_name="Roles"
+    )
     # Field used for login
     USERNAME_FIELD = "phone"
 
@@ -418,8 +424,15 @@ class Seller(models.Model):
         self.verified_at = timezone.now()
         self.save()
         
-        # Add seller role to user (when we have RBAC)
-        # TODO: Add role assignment
+        from apps.rbac.utils import assign_role
+        from apps.rbac.models import Role
+        
+        try:
+            vendor_role = Role.objects.get(name='vendor')
+            assign_role(self.user, vendor_role, admin_user)
+            print(f" Role 'vendor' assigned to user {self.user.phone}")
+        except Role.DoesNotExist:
+            print(" Role 'vendor' not found!")
     
     def reject(self, admin_user, reason):
         """Reject seller application"""
@@ -428,6 +441,13 @@ class Seller(models.Model):
         self.rejection_reason = reason
         self.save()
     
+        try:
+            vendor_role = Role.objects.get(name='vendor')
+            remove_role(self.user, vendor_role)
+            print(f" Role 'vendor' removed from user {self.user.phone}")
+        except Role.DoesNotExist:
+            pass
+        
     @property
     def is_verified(self):
         return self.status == self.StatusChoices.APPROVED

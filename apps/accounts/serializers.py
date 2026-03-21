@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from .models import Address, Profile, Seller
 
+
 User = get_user_model()
 
 
@@ -38,7 +39,15 @@ class RegisterSerializer(serializers.ModelSerializer):
 
         validated_data.pop("password2")
         user = User.objects.create_user(**validated_data)
-
+        try:
+            from apps.rbac.models import Role
+            from apps.rbac.utils import assign_role
+            
+            customer_role = Role.objects.get(name='customer')
+            assign_role(user, customer_role, None)  # assigned_by = None
+            print(f"Role 'customer' assigned to new user {user.phone}")
+        except Role.DoesNotExist:
+            print("Role 'customer' not found!")
         return user
 
 
