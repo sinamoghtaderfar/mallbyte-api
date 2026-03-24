@@ -1,5 +1,4 @@
 from rest_framework import permissions
-from .utils import has_permission as check_permission
 
 class HasPermission(permissions.BasePermission):
     """
@@ -10,6 +9,8 @@ class HasPermission(permissions.BasePermission):
         self.permission_codename = permission_codename
     
     def has_permission(self, request, view):
+        from .utils import has_permission as check_permission
+        
         if not request.user.is_authenticated:
             return False
         return check_permission(request.user, self.permission_codename)

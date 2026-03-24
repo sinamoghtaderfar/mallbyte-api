@@ -2,11 +2,11 @@ from rest_framework import generics, viewsets, status, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.contrib.auth import get_user_model
-from .models import Role, Permission, RolePermission, UserRole
+from .models import Role, Permission, RolePermission, UserRole, AdminLog
 from .serializers import (
     RoleSerializer, PermissionSerializer, RolePermissionSerializer,
     UserRoleSerializer, AssignRoleSerializer, CheckPermissionSerializer,
-    UserPermissionsSerializer
+    AdminLogSerializer
 )
 from .utils import get_user_permissions, assign_role, remove_role, has_permission
 from .permissions import IsSuperAdmin
@@ -113,6 +113,20 @@ class AssignRoleView(generics.GenericAPIView):
         user_role = assign_role(user, role, request.user, expires_at)
         response_serializer = UserRoleSerializer(user_role)
         
+        from .utils import log_admin_action
+        log_admin_action(
+            admin=request.user,
+            action='assign_role',
+            target_user=user,
+            target_role=role,
+            details={
+                'role_name': role.name,
+                'expires_at': str(expires_at) if expires_at else None,
+                'user_role_id': user_role.id
+            },
+            request=request
+        )
+        
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -126,6 +140,16 @@ class RemoveRoleView(generics.GenericAPIView):
             role = Role.objects.get(id=role_id)
         except (User.DoesNotExist, Role.DoesNotExist):
             return Response({'error': 'User or role not found'}, status=404)
+        
+        from .utils import log_admin_action
+        log_admin_action(
+            admin=request.user,
+            action='remove_role',
+            target_user=user,
+            target_role=role,
+            details={'role_name': role.name},
+            request=request
+        )
         
         remove_role(user, role)
         return Response({'message': 'Role removed successfully'}, status=200)
@@ -181,3 +205,35 @@ class CheckPermissionView(generics.GenericAPIView):
             'permission': permission_codename,
             'has_permission': has_perm
         })
+        
+class AdminLogListView(generics.ListAPIView):
+    """View for admin to see all action logs"""
+    permission_classes = [IsSuperAdmin]
+    serializer_class = AdminLogSerializer
+    queryset = AdminLog.objects.all()
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        #filtering based admin
+        admin_id = self.request.query_params.get('admin_id')
+        if admin_id:
+            queryset = queryset.filter(admin_id=admin_id)
+        
+        #filtering based target user
+        target_user = self.request.query_params.get('target_user')
+        if target_user:
+            queryset = queryset.filter(target_user_id=target_user)
+        
+        #filtering based action type
+        action_type = self.request.query_params.get('action_type')
+        if action_type:
+            queryset = queryset.filter(action_type=action_type)
+            
+        return queryset
+
+class AdminLogDetailView(generics.RetrieveAPIView):
+    """View for admin to see a specific log entry"""
+    permission_classes = [IsSuperAdmin]
+    serializer_class = AdminLogSerializer
+    queryset = AdminLog.objects.all()

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Role, Permission, RolePermission, UserRole
+from .models import Role, Permission, RolePermission, UserRole, AdminLog
 
 User = get_user_model()
 
@@ -85,3 +85,50 @@ class UserPermissionsSerializer(serializers.Serializer):
     """Serializer for user permissions"""
     user_id = serializers.IntegerField()
     permissions = serializers.ListField(child=serializers.CharField())
+    
+
+
+class AdminLogSerializer(serializers.ModelSerializer):
+    """Serializer for admin action logs"""
+    admin_name = serializers.SerializerMethodField()
+    admin_phone = serializers.SerializerMethodField()
+    target_user_name = serializers.SerializerMethodField()
+    target_user_phone = serializers.SerializerMethodField()
+    target_role_name = serializers.SerializerMethodField()
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+
+    class Meta:
+        model = AdminLog
+        fields = [
+            'id', 'admin', 'admin_name', 'admin_phone',
+            'action', 'action_display',
+            'target_user', 'target_user_name', 'target_user_phone',
+            'target_role', 'target_role_name',
+            'details', 'ip_address', 'user_agent', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_admin_name(self, obj):
+        if obj.admin:
+            return obj.admin.full_name or obj.admin.phone
+        return None
+
+    def get_admin_phone(self, obj):
+        if obj.admin:
+            return obj.admin.phone
+        return None
+
+    def get_target_user_name(self, obj):
+        if obj.target_user:
+            return obj.target_user.full_name or obj.target_user.phone
+        return None
+
+    def get_target_user_phone(self, obj):
+        if obj.target_user:
+            return obj.target_user.phone
+        return None
+
+    def get_target_role_name(self, obj):
+        if obj.target_role:
+            return obj.target_role.name
+        return None

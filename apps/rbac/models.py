@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+
 User = get_user_model()
 
 class Role(models.Model):
@@ -93,3 +94,31 @@ class UserRole(models.Model):
         if self.expires_at:
             return timezone.now() > self.expires_at
         return False
+
+
+class AdminLog(models.Model):
+    ACTION_CHOICES = [
+        ('assign_role', 'Assign Role'),
+        ('remove_role', 'Remove Role'),
+        ('approve_seller', 'Approve Seller'),
+        ('reject_seller', 'Reject Seller'),
+        ('suspend_user', 'Suspend User'),
+        ('activate_user', 'Activate User'),
+        ('change_permission', 'Change Permission'),
+        ('create_role', 'Create Role'),
+        ('delete_role', 'Delete Role'),
+        ('update_role', 'Update Role'),
+    ]
+    
+    admin = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='admin_actions')
+    action = models.CharField(max_length=50, choices=ACTION_CHOICES)
+    target_user = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='targeted_actions')
+    target_role = models.ForeignKey('Role', on_delete=models.SET_NULL, null=True, blank=True, related_name='role_actions')
+    details = models.JSONField(default=dict)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+

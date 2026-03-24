@@ -1,7 +1,3 @@
-from django.utils import timezone
-from .models import UserRole
-
-
 def get_user_roles(user):
     """Get all active roles for a user"""
     return user.user_roles.filter(is_active=True)
@@ -10,6 +6,7 @@ def get_user_roles(user):
 def get_user_permissions(user):
     """Get all permissions for a user"""
     if user.is_superuser:
+        
         from .models import Permission
         return list(Permission.objects.values_list('codename', flat=True))
     
@@ -31,6 +28,7 @@ def has_permission(user, permission_codename):
 
 def assign_role(user, role, assigned_by=None, expires_at=None):
     """Assign a role to a user"""
+    from .models import UserRole
     user_role, created = UserRole.objects.get_or_create(
         user=user,
         role=role,
@@ -50,6 +48,7 @@ def assign_role(user, role, assigned_by=None, expires_at=None):
 
 def remove_role(user, role):
     """Remove a role from a user"""
+    from .models import UserRole
     UserRole.objects.filter(user=user, role=role).delete()
 
 
@@ -57,3 +56,29 @@ def sync_user_permissions(user):
     """Sync user permissions (clear cache if needed)"""
     # For future implementation with cache
     pass
+from .models import AdminLog
+
+def get_client_ip(request):
+    """Get client IP from request"""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
+def log_admin_action(admin, action, target_user=None, target_role=None, details=None, request=None):
+    """Log an admin action"""
+    log_data = {
+        'admin': admin,
+        'action': action,
+        'target_user': target_user,
+        'target_role': target_role,
+        'details': details or {},
+    }
+    
+    if request:
+        log_data['ip_address'] = get_client_ip(request)
+        log_data['user_agent'] = request.META.get('HTTP_USER_AGENT', '')
+    
+    return AdminLog.objects.create(**log_data)

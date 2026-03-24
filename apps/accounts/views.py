@@ -431,3 +431,65 @@ class ChangePasswordView(generics.GenericAPIView):
         return Response({
             'message': 'Password changed successfully'
         }, status=status.HTTP_200_OK)
+        
+
+class AdminSellerVerifyView(generics.GenericAPIView):
+    """Admin: Verify seller"""
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = AdminSellerActionSerializer
+    
+    def post(self, request, pk):
+        """Verify a seller account"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            seller = Seller.Objects.get(pk=pk)
+            seller.is_verified = True
+        except Seller.DoesNotExist:
+            return Response({"detail": "Seller not found"}, status=status.HTTP_404_NOT_FOUND)
+        action = serializer.validated_data('action')
+        
+        if action == 'approve':
+            seller.approve(request.user)
+            
+            from apps.rbac.utils import log_admin_action
+            log_admin_action(
+                admin = request.user,
+                action_type = 'approve_seller',
+                target_user = seller.user,
+                details = {
+                    'seller_id': seller.id,
+                    'seller_name': seller.name,
+                },
+                request = request
+            )
+            return Response(
+                {"message": f"Seller {seller.store_name} approved successfully"},
+                status=status.HTTP_200_OK
+            )
+        elif action == 'reject':
+            reason = serializer.validated_data.get('reason', '')
+            seller.reject(request.user, reason)
+            
+            from apps.rbac.utils import log_admin_action
+            log_admin_action(
+                admin = request.user,
+                action = 'reject_seller',
+                target_user = seller.user,
+                details = {
+                    'seller_id': seller.id,
+                    'store_name': seller.store_name,
+                    'reason': reason,
+                },
+                request = request
+            )
+            return Response(
+                {"message": f"Seller {seller.store_name} rejected"},
+                status=status.HTTP_200_OK
+            )
+        else:
+            return Response({"error": "Action must be 'approve' or 'reject'"},
+                status=status.HTTP_400_BAD_REQUEST
+                )
+        
+            
