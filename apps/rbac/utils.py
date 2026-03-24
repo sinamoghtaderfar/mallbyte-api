@@ -1,26 +1,53 @@
+from django.core.cache import cache
+from django.utils import timezone
+
 def get_user_roles(user):
     """Get all active roles for a user"""
     return user.user_roles.filter(is_active=True)
 
 
 def get_user_permissions(user):
+    """Get all permissions for a user with caching"""
+    if user.is_anonymous:
+        return []
+    
+    cache_key = f'user_permissions_{user.id}'
+    
+    permissions = cache.get(cache_key)
+    if permissions is not None:
+        return permissions
+    
     """Get all permissions for a user"""
     if user.is_superuser:
         
         from .models import Permission
         return list(Permission.objects.values_list('codename', flat=True))
     
-    permissions = set()
-    for user_role in user.user_roles.filter(is_active=True):
-        if user_role.is_expired:
-            continue
-        for role_perm in user_role.role.role_permissions.all():
-            permissions.add(role_perm.permission.codename)
-    return list(permissions)
+    else:
+        perms_set = set()
+        for user_role in user.user_roles.filter(is_active=True):
+            if user_role.is_expired:
+                continue
+            for role_perm in user_role.role.role_permissions.all():
+                perms_set.add(role_perm.permission.codename)
+        permissions = list(perms_set)
+    #save to cache for 1 hour
+    cache.set(cache_key, permissions, 3600)
+    
+    return permissions
 
-
+def clear_user_permissions_cache(user):
+    """Clear cached permissions for a user"""
+    
+    cache_key = f'user_permissions_{user.id}'
+    cache.delete(cache_key)
+    print(f"Cache cleared for user {user.id}")
+    
+    
 def has_permission(user, permission_codename):
-    """Check if user has a specific permission"""
+    """Check if user has a specific permission (uses cache)"""
+    if user.is_anonymous:
+        return False
     if user.is_superuser:
         return True
     return permission_codename in get_user_permissions(user)
@@ -43,6 +70,8 @@ def assign_role(user, role, assigned_by=None, expires_at=None):
         user_role.expires_at = expires_at
         user_role.assigned_by = assigned_by
         user_role.save()
+        
+    clear_user_permissions_cache(user)
     return user_role
 
 
@@ -50,6 +79,8 @@ def remove_role(user, role):
     """Remove a role from a user"""
     from .models import UserRole
     UserRole.objects.filter(user=user, role=role).delete()
+    
+    clear_user_permissions_cache(user)
 
 
 def sync_user_permissions(user):
@@ -82,3 +113,4 @@ def log_admin_action(admin, action, target_user=None, target_role=None, details=
         log_data['user_agent'] = request.META.get('HTTP_USER_AGENT', '')
     
     return AdminLog.objects.create(**log_data)
+
