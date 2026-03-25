@@ -107,6 +107,7 @@ class AdminLog(models.Model):
         ('change_permission', 'Change Permission'),
         ('create_role', 'Create Role'),
         ('delete_role', 'Delete Role'),
+        ('delete_user', 'Delete User'),
         ('update_role', 'Update Role'),
     ]
     

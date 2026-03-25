@@ -5,6 +5,16 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
 class UserManager(BaseUserManager):
+    
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
+    
+    def all_with_deleted(self):
+        return super().get_queryset()
+    
+    def get(self, *args, **kwargs):
+        return self.get_queryset().get(*args, **kwargs)
+    
     def create_user(self, phone, email, full_name, password=None, **extra_fields):
         if not phone:
             raise ValueError("Phone number is required")
@@ -50,6 +60,10 @@ class User(AbstractUser):
     # Flag to indicate if the user is a seller
     is_seller = models.BooleanField(default=False, verbose_name="Is Seller?")
 
+    # Soft delete field
+    is_deleted = models.BooleanField(default=False, verbose_name="Is Deleted")
+    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name="Deleted At")
+    
     # Custom admin
     objects = UserManager()
 

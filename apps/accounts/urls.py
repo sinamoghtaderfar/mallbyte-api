@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
-    RegisterView, ProfileView, AddressViewSet,
+    AdminDeleteUserView, DeleteAccountView, RegisterView, ProfileView, AddressViewSet,
     OTPRequestView, OTPVerifyView,
     SellerApplyView, SellerStatusView, SellerDashboardView,
     SellerStoreView, AdminSellersListView, AdminSellerDetailView,
@@ -51,6 +51,14 @@ urlpatterns = [
     
     # Change password
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
+    
+    #delete user account
+    path('delete-account/', DeleteAccountView.as_view(), name='delete_account'),
+    
+    #delete user account by admin
+    path('admin/users/<int:user_id>/delete/', AdminDeleteUserView.as_view(), name='admin_delete_user'),
+    
+    
     
     
     # Include router URLs

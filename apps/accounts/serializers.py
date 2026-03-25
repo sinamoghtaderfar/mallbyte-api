@@ -240,3 +240,12 @@ class ChangePasswordSerializer(serializers.Serializer):
         if attrs['new_password'] != attrs['confirm_password']:
             raise serializers.ValidationError({"new_password": "Passwords don't match"})
         return attrs
+    
+class DeleteAccountSerializer(serializers.Serializer):
+    """Serializer for deleting account"""
+    confirm = serializers.BooleanField(required = True)
+    
+    def validate_confirm(self, value):
+        if not value:
+            raise serializers.ValidationError("You must confirm to delete your account")
+        return value

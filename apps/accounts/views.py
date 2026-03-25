@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.http import Http404
 from django.contrib.auth.hashers import check_password
-
+from django.utils import timezone
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -21,7 +21,8 @@ from .serializers import (
     OTPRequestSerializer,
     OTPVerifySerializer,
     SellerApplicationSerializer, SellerSerializer, 
-    SellerUpdateSerializer, AdminSellerActionSerializer
+    SellerUpdateSerializer, AdminSellerActionSerializer,
+    DeleteAccountSerializer
 )
 
 User = get_user_model()
@@ -492,4 +493,73 @@ class AdminSellerVerifyView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST
                 )
         
-            
+class DeleteAccountView(generics.GenericAPIView):
+    """Delete user account"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = DeleteAccountSerializer
+    
+    def delete(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = request.user
+        
+        # Soft delete
+        user.is_deleted = True
+        user.deleted_at = timezone.now()
+        user.is_active = False
+        user.save()
+        
+        return Response({
+            'message': 'Your account has been deleted successfully'
+        }, status=status.HTTP_200_OK)
+
+class AdminDeleteUserView(generics.GenericAPIView):
+    """Admin: Delete a user account"""
+    permission_classes = [permissions.IsAdminUser]
+    
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        
+        if user.id == request.user.id:
+            return Response(
+                {"error": "You cannot delete your own account"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        
+        if user.is_superuser:
+            return Response(
+                {"error": "Cannot delete super admin accounts"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Soft delete
+        user.is_deleted = True
+        user.is_active = False
+        user.deleted_at = timezone.now()
+        user.save()
+        
+        
+        from apps.rbac.utils import log_admin_action
+        log_admin_action(
+            admin=request.user,
+            action='delete_user',
+            target_user=user,
+            details={
+                'user_phone': user.phone,
+                'deleted_by': request.user.phone
+            },
+            request=request
+        )
+        
+        return Response({
+            'message': f'User {user.phone} deleted successfully'
+        }, status=status.HTTP_200_OK)
