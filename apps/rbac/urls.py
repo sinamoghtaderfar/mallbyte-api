@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    AdminLogListView, RoleViewSet, PermissionViewSet, UserRoleViewSet,
+    AdminLogListView, BulkAssignRolesView, RoleViewSet, PermissionViewSet, UserRoleViewSet,
     AssignRoleView, RemoveRoleView, UserPermissionsView,
     MyPermissionsView, CheckPermissionView, AdminLogDetailView
 )
@@ -22,4 +22,7 @@ urlpatterns = [
     # Admin logs
     path('admin-logs/', AdminLogListView.as_view(), name='admin_logs'),
     path('admin-logs/<int:pk>/', AdminLogDetailView.as_view(), name='admin_log_detail'),
+    
+    path('bulk-assign/', BulkAssignRolesView.as_view(), name='bulk_assign_roles'),
+
 ]

@@ -132,3 +132,28 @@ class AdminLogSerializer(serializers.ModelSerializer):
         if obj.target_role:
             return obj.target_role.name
         return None
+    
+class BulkAssignRoleSerializer(serializers.Serializer):
+    """Serializer for bulk assigning roles to multiple users"""
+    user_ids = serializers.ListField(child=serializers.IntegerField(), help_text="List of user IDs")
+    role_ids = serializers.ListField(child=serializers.IntegerField(), help_text="List of role IDs to assign")
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    def validate_user_ids(self, value):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        exsisting_user = User.objects.filter(id__in=value)
+        if len(exsisting_user) != len(value):
+            missing = set(value) - set(exsisting_user.values_list('id', flat=True))
+            raise serializers.ValidationError(f"Users with IDs {missing} do not exist")
+        return value
+
+    def validate_role_id(self, value):
+        from .models import Role
+        existing_roles = Role.objects.filter(id__in=value)
+        
+        if len(existing_roles) != len(value):
+            missing = set(value) - set(existing_roles.values_list('id', flat=True))
+            raise serializers.ValidationError(f"Roles not found: {missing}")
+        return value

@@ -237,3 +237,65 @@ class AdminLogDetailView(generics.RetrieveAPIView):
     permission_classes = [IsSuperAdmin]
     serializer_class = AdminLogSerializer
     queryset = AdminLog.objects.all()
+    
+class BulkAssignRolesView(generics.GenericAPIView):
+    """Bulk assign roles to users"""
+    permission_classes = [IsSuperAdmin]
+    serializer_class = AssignRoleSerializer
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user_ids = serializer.validated_data['user_ids']
+        role_id = serializer.validated_data['role_id']
+        expires_at = serializer.validated_data.get('expires_at')
+        
+        user = User.objects.filter(id__in=user_ids)
+        role = Role.objects.get(id=role_id)
+        
+        result = []
+        errors = []
+        
+        for user in users:
+            for role in roles:
+                try:
+                    user_role = assign_role(user, role, request.user, expires_at)
+                    results.append({
+                        'user_id': user.id,
+                        'user_phone': user.phone,
+                        'role_id': role.id,
+                        'role_name': role.name,
+                        'assigned_at': user_role.assigned_at
+                    })
+                    
+                    # log the admin action for each assignment
+                    from .utils import log_admin_action
+                    log_admin_action(
+                        admin=request.user,
+                        action='assign_role',
+                        target_user=user,
+                        target_role=role,
+                        details={
+                            'role_name': role.name,
+                            'expires_at': str(expires_at) if expires_at else None,
+                            'bulk': True
+                        },
+                        request=request
+                    )
+                except Exception as e:
+                    errors.append({
+                        'user_id': user.id,
+                        'role_id': role.id,
+                        'error': str(e)
+                    })
+        return Response({
+            'success': True,
+            'assigned': results,
+            'errors': errors,
+            'summary': {
+                'total_users': len(users),
+                'total_roles': len(roles),
+                'total_assignments': len(results),
+                'total_errors': len(errors)
+            }
+        }, status=status.HTTP_201_CREATED)
