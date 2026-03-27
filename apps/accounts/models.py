@@ -64,6 +64,10 @@ class User(AbstractUser):
     is_deleted = models.BooleanField(default=False, verbose_name="Is Deleted")
     deleted_at = models.DateTimeField(null=True, blank=True, verbose_name="Deleted At")
     
+    #email verification fields
+    email_verified = models.BooleanField(default=False, verbose_name="Email Verified")
+    email_verified_at = models.DateTimeField(null=True, blank=True, verbose_name="Email Verified At") 
+    
     # Custom admin
     objects = UserManager()
 

@@ -249,3 +249,18 @@ class DeleteAccountSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("You must confirm to delete your account")
         return value
+    
+class EmailVerifyRequestSerializer(serializers.Serializer):
+    """Serializer for requesting email verification"""
+    email = serializers.EmailField()
+    
+    def validate_email(self, value):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if User.objects.filter(email=value, email_verified=True).exists():
+            raise serializers.ValidationError("This email is already verified by another user")
+        return value
+    
+class EmailVerifyConfirmSerializer(serializers.Serializer):
+    """Serializer for confirming email verification"""
+    token = serializers.CharField()

@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
-    AdminDeleteUserView, DeleteAccountView, RegisterView, ProfileView, AddressViewSet,
+    AdminDeleteUserView, DeleteAccountView, EmailVerifyConfirmView, EmailVerifyRequestView, RegisterView, ProfileView, AddressViewSet,
     OTPRequestView, OTPVerifyView,
     SellerApplyView, SellerStatusView, SellerDashboardView,
     SellerStoreView, AdminSellersListView, AdminSellerDetailView,
@@ -58,7 +58,9 @@ urlpatterns = [
     #delete user account by admin
     path('admin/users/<int:user_id>/delete/', AdminDeleteUserView.as_view(), name='admin_delete_user'),
     
-    
+    # Email verification
+    path('email/verify-request/', EmailVerifyRequestView.as_view(), name='email_verify_request'),
+    path('email/verify-confirm/', EmailVerifyConfirmView.as_view(), name='email_verify_confirm'),
     
     
     # Include router URLs

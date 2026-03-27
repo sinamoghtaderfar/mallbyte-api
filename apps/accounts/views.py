@@ -10,6 +10,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import serializers
 from .permissions import IsAdminOrVendorManager
 from .models import Address, Profile, OTP, Seller
+from .utils import generate_email_verification_token, verify_email_token
 from .serializers import (
     AddressSerializer,
     ChangePasswordSerializer,
@@ -22,8 +23,13 @@ from .serializers import (
     OTPVerifySerializer,
     SellerApplicationSerializer, SellerSerializer, 
     SellerUpdateSerializer, AdminSellerActionSerializer,
-    DeleteAccountSerializer
+    DeleteAccountSerializer,
+    EmailVerifyRequestSerializer, EmailVerifyConfirmSerializer
 )
+
+from django.core.mail import send_mail
+from django.conf import settings
+
 
 User = get_user_model()
 
@@ -562,4 +568,103 @@ class AdminDeleteUserView(generics.GenericAPIView):
         
         return Response({
             'message': f'User {user.phone} deleted successfully'
+        }, status=status.HTTP_200_OK)
+        
+class EmailVerifyRequestView(generics.GenericAPIView):
+    """Request email verification (send email with token)"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = EmailVerifyRequestSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = request.user
+        new_email = serializer.validated_data['email']
+        
+        # if email already verified
+        if user.email_verified:
+            return Response(
+                {"error": "Your email is already verified"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # save new email
+        user.email = new_email
+        user.save()
+        
+        # generate token
+        token = generate_email_verification_token(user)
+        
+        # make verification link
+        verification_link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+        
+        # send email
+        try:
+            send_mail(
+                subject='Verify Your Email - MallByte',
+                message=f"""
+                    Hello {user.full_name or user.phone},
+
+                    Please click the link below to verify your email address:
+
+                    {verification_link}
+
+                    This link will expire in 1 hour.
+
+                    If you didn't request this, please ignore this email.
+
+                    Best regards,
+                    MallByte Team
+                    """,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[new_email],
+                fail_silently=False,
+            )
+            print(f"📧 Email sent to {new_email}")
+            
+        except Exception as e:
+            print(f"❌ Failed to send email: {e}")
+            # Fallback: print the verification link to console
+            print(f"\n📧 Email verification link for {new_email}:")
+            print(f"   {verification_link}\n")
+        
+        return Response({
+            'message': 'Verification email sent',
+            'email': new_email
+        }, status=status.HTTP_200_OK)
+        
+class EmailVerifyConfirmView(generics.GenericAPIView):
+    """Confirm email verification"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = EmailVerifyConfirmSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = request.user
+        token = serializer.validated_data['token']
+        
+        # if email already verified
+        if user.email_verified:
+            return Response(
+                {"error": "Email already verified"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # check token
+        if not verify_email_token(user, token):
+            return Response(
+                {"error": "Invalid or expired token"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        print(f"Verifying email for user {user.id}: {user.email}")
+        # verfy email
+        user.email_verified = True
+        user.email_verified_at = timezone.now()
+        user.save()
+        print(f"After save: email_verified={user.email_verified}")
+        return Response({
+            'message': 'Email verified successfully'
         }, status=status.HTTP_200_OK)
