@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     # Local apps
     "apps.accounts",
     "apps.rbac",
+    'apps.products',
 ]
 
 MIDDLEWARE = [
