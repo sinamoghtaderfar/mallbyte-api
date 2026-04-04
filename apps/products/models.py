@@ -119,6 +119,13 @@ class Product(models.Model):
         default=StatusChoices.PENDING,
         verbose_name="Status"
     )
+    
+    tags = models.ManyToManyField(
+        'Tag',
+        related_name='products',
+        blank=True,
+        verbose_name="Tags"
+    )
     is_active = models.BooleanField(default=True, verbose_name="Is Active")
     is_featured = models.BooleanField(default=False, verbose_name="Featured Product")
     

@@ -1,4 +1,6 @@
 from rest_framework import serializers
+
+from apps.rbac import models
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
     Attribute, AttributeValue, ProductAttribute, Tag, 
@@ -129,14 +131,19 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_average_rating(self, obj):
+        
+        #from apps.reviews.models import Review
+        #result = Review.objects.filter(product=obj).aggregate(avg=models.Avg('rating'))
        
         return 0
     
     def get_reviews_count(self, obj):
+        #return obj.reviews.count()
         return 0
     
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating products (for vendors)"""
+    id = serializers.IntegerField(read_only=True)
     images = ProductImageSerializer(many=True, required=False)
     variants = ProductVariantSerializer(many=True, required=False)
     tags = serializers.SlugRelatedField(
@@ -145,7 +152,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Product
-        fields = ['name', 'description', 'short_description', 'price', 'compare_price',
+        fields = ['id', 'name', 'description', 'short_description', 'price', 'compare_price',
                   'cost_per_item', 'category', 'brand', 'sku', 'stock',
                   'low_stock_threshold', 'weight', 'length', 'width', 'height',
                   'is_featured', 'images', 'variants', 'tags']
