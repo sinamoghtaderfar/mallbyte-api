@@ -3,7 +3,7 @@ from rest_framework import serializers
 from apps.rbac import models
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
-    Attribute, AttributeValue, ProductAttribute, Tag, 
+    Attribute, AttributeValue, ProductAttribute, Review, Tag, Wishlist, 
 )
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -97,7 +97,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     seller_phone = serializers.ReadOnlyField(source='seller.phone')
     category_name = serializers.ReadOnlyField(source='category.name')
     brand_name = serializers.ReadOnlyField(source='brand.name')
-    brand_logo = serializers.ReadOnlyField(source='brand.logo')
+    brand_logo = serializers.SerializerMethodField()
     images = ProductImageSerializer(many=True, read_only=True)
     variants = ProductVariantSerializer(many=True, read_only=True)
     attributes = serializers.SerializerMethodField()
@@ -140,6 +140,11 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     def get_reviews_count(self, obj):
         #return obj.reviews.count()
         return 0
+    
+    def get_brand_logo(self, obj):
+        if obj.brand and obj.brand.logo:
+            return obj.brand.logo.url
+        return None
     
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating products (for vendors)"""
@@ -200,3 +205,31 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             instance.tags.set(tags_data)
         
         return instance
+    
+
+class ReviewSerializer(serializers.ModelSerializer):
+    user_name = serializers.ReadOnlyField(source='user.full_name')
+    user_phone = serializers.ReadOnlyField(source='user.phone')
+    
+    class Meta:
+        model = Review
+        fields = ['id', 'product', 'user', 'user_name', 'user_phone',
+                  'rating', 'title', 'comment', 'is_approved', 
+                  'helpful_count', 'created_at']
+        read_only_fields = ['id', 'user', 'is_approved', 'helpful_count', 'created_at']
+
+class WishlistSerializer(serializers.ModelSerializer):
+    product_name = serializers.ReadOnlyField(source='product.name')
+    product_price = serializers.ReadOnlyField(source='product.price')
+    product_image = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Wishlist
+        fields = ['id', 'product', 'product_name', 'product_price', 'product_image', 'created_at']
+        read_only_fields = ['id', 'created_at']
+    
+    def get_product_image(self, obj):
+        main_image = obj.product.images.filter(is_main=True).first()
+        if main_image:
+            return main_image.image.url
+        return None

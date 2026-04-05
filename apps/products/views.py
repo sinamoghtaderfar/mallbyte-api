@@ -8,16 +8,18 @@ from django.utils import timezone
 
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
-    Attribute, AttributeValue, Tag
+    Attribute, AttributeValue, Review, Tag, Wishlist
 )
 from .serializers import (
     CategorySerializer, BrandSerializer, ProductListSerializer,
     ProductDetailSerializer, ProductCreateUpdateSerializer,
     ProductImageSerializer, ProductVariantSerializer,
-    AttributeSerializer, AttributeValueSerializer, TagSerializer
+    AttributeSerializer, AttributeValueSerializer, ReviewSerializer, TagSerializer,
+    WishlistSerializer
 )
 from .filters import ProductFilter
 from apps.rbac.permissions import IsVendor, IsProductAdmin
+from .signals import add_product_to_recently_viewed
 
 
 # ==================== Category Views ====================
@@ -89,7 +91,6 @@ class TagViewSet(viewsets.ModelViewSet):
 
 
 # ==================== Product Views ====================
-
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -156,14 +157,26 @@ class ProductViewSet(viewsets.ModelViewSet):
         product.save()
         return Response({'is_featured': product.is_featured})
     
-    @action(detail=True, methods=['post'])
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
+    def featured(self, request):
+        """Get featured products (public)"""
+        products = Product.objects.filter(is_featured=True, status='approved', is_active=True)
+        serializer = ProductListSerializer(products, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def add_view(self, request, pk=None):
+        """Increase product view count (public)"""
         product = self.get_object()
         product.views_count += 1
         product.save()
+        
+        if request.user.is_authenticated:
+            add_product_to_recently_viewed(request.user, product)
+        
         return Response({'views_count': product.views_count})
     
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get'], permission_classes=[AllowAny])
     def related(self, request, pk=None):
         product = self.get_object()
         related = Product.objects.filter(
@@ -172,12 +185,6 @@ class ProductViewSet(viewsets.ModelViewSet):
             is_active=True
         ).exclude(id=product.id)[:10]
         serializer = ProductListSerializer(related, many=True, context={'request': request})
-        return Response(serializer.data)
-    
-    @action(detail=False, methods=['get'])
-    def featured(self, request):
-        products = Product.objects.filter(is_featured=True, status='approved', is_active=True)
-        serializer = ProductListSerializer(products, many=True, context={'request': request})
         return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
@@ -204,8 +211,8 @@ class ProductImageViewSet(viewsets.ModelViewSet):
         serializer.save(product=product)
 
 
-
 # ==================== Product Variant Views ====================
+
 class ProductVariantViewSet(viewsets.ModelViewSet):
     serializer_class = ProductVariantSerializer
     permission_classes = [IsAuthenticated, IsVendor]
@@ -217,3 +224,58 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
         product_id = self.request.data.get('product')
         product = get_object_or_404(Product, id=product_id, seller=self.request.user)
         serializer.save(product=product)
+
+
+# ==================== Review Views ====================
+
+class ReviewViewSet(viewsets.ModelViewSet):
+    serializer_class = ReviewSerializer
+    
+    def get_queryset(self):
+       
+        queryset = Review.objects.filter(is_approved=True)
+        product_id = self.request.query_params.get('product')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        return queryset
+    
+    def get_object(self):
+     
+        queryset = Review.objects.all()
+        obj = get_object_or_404(queryset, pk=self.kwargs['pk'])
+        self.check_object_permissions(self.request, obj)
+        return obj
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+    
+    @action(detail=True, methods=['post'])
+    def helpful(self, request, pk=None):
+        review = self.get_object()
+        review.helpful_count += 1
+        review.save()
+        return Response({'helpful_count': review.helpful_count})
+    
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+# ==================== Wishlist Views ====================
+
+class WishlistViewSet(viewsets.ModelViewSet):
+    serializer_class = WishlistSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return Wishlist.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+    
+    @action(detail=False, methods=['delete'])
+    def remove(self, request):
+        product_id = request.data.get('product_id')
+        Wishlist.objects.filter(user=request.user, product_id=product_id).delete()
+        return Response({'message': 'Removed from wishlist'})
+
+    

@@ -99,6 +99,8 @@ class Product(models.Model):
     description = models.TextField(verbose_name="Description")
     short_description = models.TextField(max_length=500, blank=True)
     
+    avrage_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    reviews_count = models.PositiveIntegerField(default=0)
     # Pricing
     price = models.DecimalField(max_digits=12, decimal_places=0, verbose_name="Price")
     compare_price = models.DecimalField(
@@ -330,3 +332,36 @@ class ProductTag(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.tag.name}"
+    
+class Review(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.PositiveSmallIntegerField()
+    title = models.CharField(max_length=200, blank=True)
+    comment = models.TextField()
+    is_approved = models.BooleanField(default=False)
+    helpful_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['product', 'user']
+        ordering = ['-created_at']
+        
+class Wishlist(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wishlist')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='wishlisted_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['user', 'product']
+        ordering = ['-created_at']
+        
+class RecentlyViewed(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='recently_viewed')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-viewed_at']
+        unique_together = ['user', 'product']
