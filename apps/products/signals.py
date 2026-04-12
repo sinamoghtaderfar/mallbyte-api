@@ -2,9 +2,10 @@
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.core.mail import send_mail
 from .models import RecentlyViewed, Product
 from django.utils import timezone
-
+from django.conf import settings
 
 @receiver(post_save, sender=Product)
 def add_to_recently_viewed(sender, instance, created, **kwargs):
@@ -35,3 +36,31 @@ def add_product_to_recently_viewed(user, product):
         oldest = RecentlyViewed.objects.filter(user=user).order_by('viewed_at').first()
         if oldest:
             oldest.delete()
+            
+@receiver(post_save, sender=Product)
+def chek_low_stock(sender, instance, **kwargs):
+    """Check if product stock is low and send email notification"""
+    if instance.stock <= instance.low_stock_threshold and instance.stock > 0:
+        # Send low stock email notification to vondor
+        if hasattr(instance.seller, 'seller'):
+            seller_email = instance.seller.email
+            send_mail(
+                subject=f'⚠️ Low Stock Alert: {instance.name}',
+                message=f"""
+                Hello {instance.seller.full_name},
+
+                Your product "{instance.name}" is running low on stock!
+
+                Current stock: {instance.stock}
+                Threshold: {instance.low_stock_threshold}
+
+                Please restock soon to avoid losing sales.
+
+                Best regards,
+                MallByte Team
+                """,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[seller_email],
+                fail_silently=True,
+            )
+            print(f"📧 Low stock alert sent to {seller_email}")

@@ -1,3 +1,6 @@
+import csv
+import pandas as pd
+from rest_framework.parsers import MultiPartParser
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -5,16 +8,18 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-
+from django.http import HttpResponse
+from openpyxl import Workbook
+from rest_framework import generics
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
-    Attribute, AttributeValue, Review, Tag, Wishlist
+    Attribute, AttributeValue, Review, Tag, Wishlist,RecentlyViewed
 )
 from .serializers import (
     CategorySerializer, BrandSerializer, ProductListSerializer,
     ProductDetailSerializer, ProductCreateUpdateSerializer,
     ProductImageSerializer, ProductVariantSerializer,
-    AttributeSerializer, AttributeValueSerializer, ReviewSerializer, TagSerializer,
+    AttributeSerializer, AttributeValueSerializer, RecentlyViewedSerializer, ReviewSerializer, TagSerializer,
     WishlistSerializer
 )
 from .filters import ProductFilter
@@ -171,10 +176,30 @@ class ProductViewSet(viewsets.ModelViewSet):
         product.views_count += 1
         product.save()
         
+        #Recently Viewed
         if request.user.is_authenticated:
-            add_product_to_recently_viewed(request.user, product)
+            #delete old view if exists to avoid duplicates
+            RecentlyViewed.objects.filter(user=request.user, product=product).delete()
+            #create new view
+            RecentlyViewed.objects.create(user=request.user, product=product)
+            
+            #save 20 recently viewed products
+            recent_count = RecentlyViewed.objects.filter(user=request.user).count()
+            if recent_count > 20:
+                oldest = RecentlyViewed.objects.filter(user=request.user).order_by('viewed_at').first()
+                if oldest:
+                    oldest.delete()
         
         return Response({'views_count': product.views_count})
+    @action(detail=False, methods=['get'])
+    def recently_viewed(self, request):
+        """Get recently viewed products for current user"""
+        if not request.user.is_authenticated:
+            return Response({'error': 'Authentication required'}, status=401)
+        
+        recent = RecentlyViewed.objects.filter(user=request.user)[:20]
+        serializer = RecentlyViewedSerializer(recent, many=True, context={'request': request})
+        return Response(serializer.data)
     
     @action(detail=True, methods=['get'], permission_classes=[AllowAny])
     def related(self, request, pk=None):
@@ -278,4 +303,161 @@ class WishlistViewSet(viewsets.ModelViewSet):
         Wishlist.objects.filter(user=request.user, product_id=product_id).delete()
         return Response({'message': 'Removed from wishlist'})
 
+class RecentlyViewedViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin):
+    """ViewSet for recently viewed products"""
     
+    serializer_class = RecentlyViewedSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return RecentlyViewed.objects.filter(user=self.request.user)[:20]
+
+
+
+class ProductExportView(generics.GenericAPIView):
+    """Export products to CSV or Excel"""
+    permission_classes = [IsAuthenticated, IsProductAdmin]
+    
+    def get(self, request):
+        print(">>> ProductExportView called")
+        format_type = request.query_params.get('export_format', 'csv')
+        products = Product.objects.all()
+        
+        if format_type == 'csv':
+            return self.export_csv(products)
+        elif format_type == 'excel':
+            return self.export_excel(products)
+        else:
+            return Response({'error': 'Invalid format. Use csv or excel'}, status=400)
+    
+    def export_csv(self, products):
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="products.csv"'
+        
+        writer = csv.writer(response) 
+        writer.writerow(['ID', 'Name', 'Price', 'Stock', 'Status', 'Category', 'Brand', 'Created At'])
+        
+        for product in products:
+            writer.writerow([
+                product.id,
+                product.name,
+                product.price,
+                product.stock,
+                product.status,
+                product.category.name if product.category else '-',
+                product.brand.name if product.brand else '-',
+                product.created_at
+            ])
+        
+        return response
+    
+    def export_excel(self, products):
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="products.xlsx"'
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Products"
+        
+        ws.append(['ID', 'Name', 'Price', 'Stock', 'Status', 'Category', 'Brand', 'Created At'])
+        
+        for product in products:
+            ws.append([
+                product.id,
+                product.name,
+                product.price,
+                product.stock,
+                product.status,
+                product.category.name if product.category else '-',
+                product.brand.name if product.brand else '-',
+                product.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+        
+        wb.save(response)
+        return response
+    
+    
+
+class BulkProductUploadView(generics.CreateAPIView):
+    """Upload multiple products via CSV/Excel"""
+    permission_classes = [IsAuthenticated, IsVendor]
+    parser_classes = [MultiPartParser]
+    
+    def post(self, request):
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'error': 'No file provided'}, status=400)
+        
+        # read file
+    
+        if file.name.endswith('.csv'):
+            df = pd.read_csv(file)
+        elif file.name.endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(file)
+        else:
+            return Response({'error': 'Invalid file format. Use CSV or Excel'}, status=400)
+        
+        results = {'created': 0, 'errors': []}
+        
+        for index, row in df.iterrows():
+            try:
+                product = Product.objects.create(
+                    seller=request.user,
+                    name=row['name'],
+                    description=row.get('description', ''),
+                    price=row['price'],
+                    sku=row['sku'],
+                    stock=row.get('stock', 0),
+                    category_id=row['category_id'],
+                    brand_id=row.get('brand_id'),
+                    status='pending'
+                )
+                results['created'] += 1
+            except Exception as e:
+                results['errors'].append({'row': index + 2, 'error': str(e)})
+        
+        return Response(results, status=201)
+class ProductComparisonView(generics.GenericAPIView):
+    """Compare multiple products"""
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        product_ids = request.query_params.get('ids', '').split(',')
+        if not product_ids or not product_ids[0]:
+            return Response({'error': 'Provide product IDs: ?ids=1,2,3'}, status=400)
+        
+        products = Product.objects.filter(id__in=product_ids, status='approved', is_active=True)
+        
+        if products.count() != len(product_ids):
+            return Response({'error': 'Some products not found'}, status=404)
+        
+        comparison_data = {
+            'products': [],
+            'attributes': {}
+        }
+        
+        for product in products:
+            product_data = {
+                'id': product.id,
+                'name': product.name,
+                'price': product.price,
+                'final_price': product.final_price,
+                'stock': product.stock,
+                'image': product.images.filter(is_main=True).first().image.url if product.images.filter(is_main=True).first() else None,
+                'attributes': {}
+            }
+            
+            
+            for attr in product.product_attributes.all():
+                attr_name = attr.attribute_value.attribute.name
+                attr_value = attr.attribute_value.value
+                product_data['attributes'][attr_name] = attr_value
+            
+            comparison_data['products'].append(product_data)
+        
+        return Response(comparison_data)
+
+
+

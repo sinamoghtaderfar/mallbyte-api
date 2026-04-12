@@ -3,7 +3,7 @@ from rest_framework import serializers
 from apps.rbac import models
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
-    Attribute, AttributeValue, ProductAttribute, Review, Tag, Wishlist, 
+    Attribute, AttributeValue, ProductAttribute, RecentlyViewed, Review, Tag, Wishlist, 
 )
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -228,6 +228,22 @@ class WishlistSerializer(serializers.ModelSerializer):
         fields = ['id', 'product', 'product_name', 'product_price', 'product_image', 'created_at']
         read_only_fields = ['id', 'created_at']
     
+    def get_product_image(self, obj):
+        main_image = obj.product.images.filter(is_main=True).first()
+        if main_image:
+            return main_image.image.url
+        return None
+    
+class RecentlyViewedSerializer(serializers.ModelSerializer):
+    product_name = serializers.ReadOnlyField(source="product.name")
+    product_price = serializers.ReadOnlyField(source="product.price")
+    product_image = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = RecentlyViewed
+        fields = ['id', 'product', 'product_name', 'product_price', 'product_image', 'viewed_at']
+        read_only_fields = ['id', 'viewed_at']
+        
     def get_product_image(self, obj):
         main_image = obj.product.images.filter(is_main=True).first()
         if main_image:

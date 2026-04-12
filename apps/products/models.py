@@ -365,3 +365,18 @@ class RecentlyViewed(models.Model):
     class Meta:
         ordering = ['-viewed_at']
         unique_together = ['user', 'product']
+        
+class RecentlyViewed(models.Model):
+    """Products recently viewed by users"""
+    user = models.ForeignKey(User,on_delete=models.CASCADE, related_name="recently_viewed")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="viewed_by")
+    viewed_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-viewed_at']
+        unique_together = ['user', 'product']
+        
+    def __str__(self):
+        return f"{self.user.phone} viewed {self.product.name}"
+    
+    
