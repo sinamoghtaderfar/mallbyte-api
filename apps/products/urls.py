@@ -4,10 +4,10 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    BulkProductUploadView, CategoryViewSet, BrandViewSet, ProductComparisonView, ProductExportView, ProductViewSet,
+    BulkProductUploadView, CategoryViewSet, BrandViewSet, ProductComparisonView, ProductExportView, ProductQRCodeView, ProductViewSet,
     AttributeViewSet, AttributeValueViewSet, TagViewSet,
     ProductImageViewSet, ProductVariantViewSet,
-    ReviewViewSet, WishlistViewSet, RecentlyViewedViewSet
+    ReviewViewSet, WishlistViewSet, RecentlyViewedViewSet,ProductLabelsView
 )
 
 router = DefaultRouter()
@@ -38,7 +38,11 @@ urlpatterns = [
     
     path('compare/', ProductComparisonView.as_view(), name='product-compare'),
     
+    path('products/<int:product_id>/qr-code/', ProductQRCodeView.as_view(), name='product-qr-code'),
     
+    path('labels/', ProductLabelsView.as_view(), name='product-labels'),
+
+
 ]
 
 

@@ -6,6 +6,8 @@ from django.core.mail import send_mail
 from .models import RecentlyViewed, Product
 from django.utils import timezone
 from django.conf import settings
+from .utils import generate_product_qr_code
+
 
 @receiver(post_save, sender=Product)
 def add_to_recently_viewed(sender, instance, created, **kwargs):
@@ -64,3 +66,10 @@ def chek_low_stock(sender, instance, **kwargs):
                 fail_silently=True,
             )
             print(f"📧 Low stock alert sent to {seller_email}")
+            
+            
+@receiver(post_save, sender=Product)
+def generate_qr_code(sender, instance, created, **kwargs):
+    if created and not instance.qr_code:
+        generate_product_qr_code(instance)
+        Product.objects.filter(pk=instance.pk).update(qr_code=instance.qr_code.name)

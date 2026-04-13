@@ -94,6 +94,20 @@ class Product(models.Model):
         related_name='products',
         verbose_name="Brand"
     )
+    barcode = models.CharField(
+        max_length=50, 
+        unique=True, 
+        null=True, 
+        blank=True,
+        verbose_name="Barcode",
+        help_text="Product barcode (EAN-13, UPC-A, etc.)"
+    )
+    qr_code = models.ImageField(
+        upload_to='products/qrcodes/',
+        null=True,
+        blank=True,
+        verbose_name="QR Code"
+    )
     name = models.CharField(max_length=255, verbose_name="Product Name")
     slug = models.SlugField(unique=True, verbose_name="Slug")
     description = models.TextField(verbose_name="Description")
@@ -160,6 +174,20 @@ class Product(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class LabelChoices(models.TextChoices):
+        NEW = 'new', 'New'
+        BESTSELLER = 'bestseller', 'Bestseller'
+        DISCOUNTED = 'discounted', 'Discounted'
+        LIMITED = 'limited', 'Limited Edition'
+        PREORDER = 'preorder', 'Pre-order'
+        
+    labels = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Product Labels",
+        help_text="List of labels: new, bestseller, discounted, limited, preorder"
+    )
+    
     class Meta:
         verbose_name = "Product"
         verbose_name_plural = "Products"

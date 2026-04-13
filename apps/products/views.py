@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 from openpyxl import Workbook
 from rest_framework import generics
 from .models import (
@@ -461,3 +461,31 @@ class ProductComparisonView(generics.GenericAPIView):
 
 
 
+class ProductQRCodeView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, product_id):
+        try:
+            product = Product.objects.get(id=product_id, status='approved')
+        except Product.DoesNotExist:
+            return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not product.qr_code:
+            return Response({'error': 'QR code not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        return FileResponse(product.qr_code.open('rb'), content_type='image/png')
+        
+
+class ProductLabelsView(generics.GenericAPIView):
+    """Get list of available product labels"""
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        labels = [
+            {'value': 'new', 'display': ' New', 'icon': '🆕'},
+            {'value': 'bestseller', 'display': 'Bestseller', 'icon': '⭐'},
+            {'value': 'discounted', 'display': 'Discounted', 'icon': '💰'},
+            {'value': 'limited', 'display': 'Limited Edition', 'icon': '🔒'},
+            {'value': 'preorder', 'display': 'Pre-order', 'icon': '📦'},
+        ]
+        return Response(labels)

@@ -12,6 +12,12 @@ class ProductFilter(filters.FilterSet):
     in_stock = filters.BooleanFilter(method='filter_in_stock')
     has_discount = filters.BooleanFilter(method='filter_has_discount')
     search = filters.CharFilter(method='filter_search')
+    label = filters.CharFilter(method='filter_by_label')
+    
+    def filter_by_label(self, queryset, name, value):
+        
+        return queryset.filter(labels__contains=[value])
+    
     
     class Meta:
         model = Product
