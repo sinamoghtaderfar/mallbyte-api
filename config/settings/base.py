@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.rbac",
     'apps.products',
+    'apps.inventory',
 ]
 
 MIDDLEWARE = [
