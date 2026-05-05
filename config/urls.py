@@ -30,6 +30,7 @@ urlpatterns = [
     ),
     path('api/rbac/', include('apps.rbac.urls')),
     path('api/products/', include('apps.products.urls')),
+    path('api/inventory/', include('apps.inventory.urls')),
 ]
 
 
