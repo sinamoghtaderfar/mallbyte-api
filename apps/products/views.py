@@ -101,7 +101,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ['name', 'description', 'sku', 'brand__name']
-    ordering_fields = ['price', 'created_at', 'views_count', 'stock']
+    ordering_fields = ['price', 'created_at', 'views_count']
     ordering = ['-created_at']
     
     def get_serializer_class(self):
@@ -409,7 +409,6 @@ class BulkProductUploadView(generics.CreateAPIView):
                     description=row.get('description', ''),
                     price=row['price'],
                     sku=row['sku'],
-                    stock=row.get('stock', 0),
                     category_id=row['category_id'],
                     brand_id=row.get('brand_id'),
                     status='pending'

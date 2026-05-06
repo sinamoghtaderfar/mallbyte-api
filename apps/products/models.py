@@ -1,5 +1,7 @@
 # apps/products/models.py
 
+from unittest import result
+
 from django.db import models
 from django.utils.text import slugify
 from django.contrib.auth import get_user_model
@@ -147,7 +149,6 @@ class Product(models.Model):
     
     # Inventory
     sku = models.CharField(max_length=100, unique=True, verbose_name="SKU")
-    stock = models.PositiveIntegerField(default=0, verbose_name="Stock Quantity")
     low_stock_threshold = models.PositiveIntegerField(default=5, verbose_name="Low Stock Alert")
     
     # Weight & dimensions (for shipping)
@@ -216,6 +217,40 @@ class Product(models.Model):
     def final_price(self):
         """Get final price (with discount if any)"""
         return self.compare_price if self.compare_price else self.price
+    
+    @property
+    def total_stock(self):
+        """Total stock across all warehouses."""
+        result = self.stock_items.aggregate(total=models.Sum("quantity"))
+        return result["total"] or 0
+
+
+    @property
+    def reserved_stock(self):
+        """Total reserved stock across all warehouses."""
+        result = self.stock_items.aggregate(total=models.Sum("reserved_quantity"))
+        return result["total"] or 0
+
+
+    @property
+    def available_stock(self):
+        """Available stock across all warehouses."""
+        return self.total_stock - self.reserved_stock
+
+
+    @property
+    def stock(self):
+        """
+        Backward-compatible stock value.
+        Old product APIs still return `stock`,
+        but the value now comes from inventory.Stock.
+        """
+        return self.total_stock
+
+
+    @property
+    def is_in_stock(self):
+        return self.available_stock > 0
 
 
 class ProductImage(models.Model):

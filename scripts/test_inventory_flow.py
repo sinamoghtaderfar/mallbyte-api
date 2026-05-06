@@ -148,7 +148,6 @@ def create_test_product(seller_user, unique):
         cost_per_item=70000,
         status="approved",
         sku=f"SKU-{unique}",
-        stock=0,
         low_stock_threshold=5,
         barcode=f"BAR-{unique}",
         labels=["new"],

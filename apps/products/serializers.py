@@ -70,6 +70,10 @@ class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.name')
     final_price = serializers.ReadOnlyField()
     
+    stock = serializers.IntegerField(read_only=True)
+    available_stock = serializers.IntegerField(read_only=True)
+    reserved_stock = serializers.IntegerField(read_only=True)
+    
     label_display = serializers.SerializerMethodField()
     def get_label_display(self, obj):
         labels_map = {
@@ -83,9 +87,13 @@ class ProductListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Product
-        fields = ['id', 'name', 'slug', 'main_image', 'price', 'compare_price', 
-                  'final_price', 'brand_name', 'category_name', 'stock', 
-                  'is_featured', 'views_count', 'created_at', 'barcode', 'labels', 'label_display']
+        fields = [
+            'id', 'name', 'slug', 'main_image', 'price', 'compare_price',
+            'final_price', 'brand_name', 'category_name',
+            'stock', 'available_stock', 'reserved_stock',
+            'is_featured', 'views_count', 'created_at',
+            'barcode', 'labels', 'label_display'
+        ]
     
     def get_main_image(self, obj):
         main_image = obj.images.filter(is_main=True).first()
@@ -117,13 +125,19 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     reviews_count = serializers.SerializerMethodField()
     
+    stock = serializers.IntegerField(read_only=True)
+    available_stock = serializers.IntegerField(read_only=True)
+    reserved_stock = serializers.IntegerField(read_only=True)
+    is_in_stock = serializers.BooleanField(read_only=True)
+    
     label_display = serializers.SerializerMethodField()
     class Meta:
         model = Product
         fields = ['id', 'name', 'slug', 'description', 'short_description',
                   'price', 'compare_price', 'final_price', 'cost_per_item',
                   'seller_name', 'seller_phone', 'category', 'category_name',
-                  'brand', 'brand_name', 'brand_logo', 'sku', 'stock',
+                  'brand', 'brand_name', 'brand_logo', 'sku', 'stock','stock', 
+                  'available_stock', 'reserved_stock', 'is_in_stock',
                   'low_stock_threshold', 'weight', 'length', 'width', 'height',
                   'status', 'is_active', 'is_featured', 'images', 'variants',
                   'attributes', 'tags', 'average_rating', 'reviews_count',
@@ -176,13 +190,20 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     tags = serializers.SlugRelatedField(
         many=True, slug_field='name', queryset=Tag.objects.all(), required=False
     )
-    
+    stock = serializers.IntegerField(read_only=True)
+    available_stock = serializers.IntegerField(read_only=True)
+    reserved_stock = serializers.IntegerField(read_only=True)
     class Meta:
         model = Product
-        fields = ['id', 'name', 'description', 'short_description', 'price', 'compare_price',
-                  'cost_per_item', 'category', 'brand', 'sku', 'stock',
-                  'low_stock_threshold', 'weight', 'length', 'width', 'height',
-                  'is_featured', 'images', 'variants', 'tags','barcode','labels',]
+        fields = [
+            'id', 'name', 'description', 'short_description',
+            'price', 'compare_price', 'cost_per_item',
+            'category', 'brand', 'sku',
+            'stock', 'available_stock', 'reserved_stock',
+            'low_stock_threshold', 'weight', 'length', 'width', 'height',
+            'is_featured', 'images', 'variants', 'tags',
+            'barcode', 'labels',
+        ]
     
     def create(self, validated_data):
         images_data = validated_data.pop('images', [])
