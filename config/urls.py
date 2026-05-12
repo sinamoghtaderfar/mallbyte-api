@@ -31,6 +31,8 @@ urlpatterns = [
     path('api/rbac/', include('apps.rbac.urls')),
     path('api/products/', include('apps.products.urls')),
     path("api/inventory/", include("apps.inventory.urls")),
+    
+    path("api/orders/", include("apps.orders.urls")),
 ]
 
 
