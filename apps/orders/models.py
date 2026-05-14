@@ -3,13 +3,12 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
 from apps.products.models import Product
-from apps.inventory.models import Warehouse
-
+from apps.inventory.models import Stock, Warehouse
 
 class Cart(models.Model):
     """
@@ -284,16 +283,56 @@ class Order(models.Model):
         self.paid_at = timezone.now()
         self.save(update_fields=["status", "payment_status", "paid_at", "total_amount", "updated_at"])
 
-    def cancel(self):
+    def cancel(self, user=None):
         """
-        Cancel order if it is not delivered.
-        """
-        if self.status == self.StatusChoices.DELIVERED:
-            raise ValidationError("Delivered orders cannot be cancelled.")
+        Cancel order and release reserved stock.
 
-        self.status = self.StatusChoices.CANCELLED
-        self.cancelled_at = timezone.now()
-        self.save(update_fields=["status", "cancelled_at", "total_amount", "updated_at"])
+        When checkout happens, stock is reserved.
+        If the order is cancelled before payment/shipping,
+        the reserved stock must be released.
+        """
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=self.pk)
+
+            if order.status == self.StatusChoices.DELIVERED:
+                raise ValidationError("Delivered orders cannot be cancelled.")
+
+            if order.status == self.StatusChoices.CANCELLED:
+                raise ValidationError("Order is already cancelled.")
+
+            for item in order.items.select_related("product", "warehouse"):
+                if not item.warehouse_id:
+                    continue
+
+                try:
+                    stock = Stock.objects.select_for_update().get(
+                        product=item.product,
+                        warehouse=item.warehouse,
+                    )
+                except Stock.DoesNotExist:
+                    continue
+
+                stock.release_reservation(
+                    quantity=item.quantity,
+                    user=user,
+                )
+
+            order.status = self.StatusChoices.CANCELLED
+            order.cancelled_at = timezone.now()
+            order.save(
+                update_fields=[
+                    "status",
+                    "cancelled_at",
+                    "total_amount",
+                    "updated_at",
+                ]
+            )
+
+            self.status = order.status
+            self.cancelled_at = order.cancelled_at
+            self.updated_at = order.updated_at
+
+        return self
 
 
 class OrderItem(models.Model):

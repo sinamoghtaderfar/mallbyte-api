@@ -256,7 +256,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         old_status = order.status
 
         try:
-            order.cancel()
+            order.cancel(user=request.user)
         except DjangoValidationError as exc:
             return Response(
                 {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
