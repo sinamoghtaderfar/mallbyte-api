@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
+from requests import request
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -48,10 +49,12 @@ class CartViewSet(viewsets.GenericViewSet):
         cart, created = Cart.objects.get_or_create(user=self.request.user)
         return cart
 
-    @action(detail=False, methods=["get"], url_path="")
-    def retrieve_cart(self, request):
+    def list(self, request):
         """
         Show current user's cart.
+
+        Endpoint:
+        GET /api/orders/cart/
         """
         cart = self.get_cart()
         serializer = CartSerializer(cart)
@@ -100,46 +103,43 @@ class CartViewSet(viewsets.GenericViewSet):
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(
-        detail=False,
-        methods=["patch"],
-        url_path=r"items/(?P<item_id>[^/.]+)",
-    )
-    def update_item(self, request, item_id=None):
+    detail=False,
+    methods=["patch", "delete"],
+    url_path=r"items/(?P<item_id>[^/.]+)",
+)
+    def item_detail(self, request, item_id=None):
         """
-        Update quantity of one cart item.
-        """
-        cart = self.get_cart()
-        cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
+        Update or remove one cart item.
 
-        serializer = UpdateCartItemSerializer(
-            data=request.data,
-            context={"cart_item": cart_item},
-        )
-        serializer.is_valid(raise_exception=True)
+        PATCH:
+        /api/orders/cart/items/{item_id}/
 
-        cart_item.quantity = serializer.validated_data["quantity"]
-        cart_item.unit_price = cart_item.product.final_price
-        cart_item.save()
-
-        response_serializer = CartSerializer(cart)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
-
-    @action(
-        detail=False,
-        methods=["delete"],
-        url_path=r"items/(?P<item_id>[^/.]+)",
-    )
-    def remove_item(self, request, item_id=None):
-        """
-        Remove one item from cart.
+        DELETE:
+        /api/orders/cart/items/{item_id}/
         """
         cart = self.get_cart()
         cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
-        cart_item.delete()
+
+        if request.method == "PATCH":
+            serializer = UpdateCartItemSerializer(
+                data=request.data,
+                context={"cart_item": cart_item},
+            )
+            serializer.is_valid(raise_exception=True)
+
+            cart_item.quantity = serializer.validated_data["quantity"]
+            cart_item.unit_price = cart_item.product.final_price
+            cart_item.save()
+
+            response_serializer = CartSerializer(cart)
+            return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+        if request.method == "DELETE":
+            cart_item.delete()
 
         response_serializer = CartSerializer(cart)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
-
+    
     @action(detail=False, methods=["delete"], url_path="clear")
     def clear_cart(self, request):
         """
