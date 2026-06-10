@@ -12,3 +12,5 @@ django-redis==5.4.0
 pillow==11.1.0
 django-filter==25.2
 qrcode==7.4.2
+drf-spectacular==0.28.0
+django-extensions

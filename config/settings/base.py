@@ -87,16 +87,12 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Database
 DATABASES = {
     "default": {
-        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.mysql"),
+        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.postgresql"),
         "NAME": os.getenv("DB_NAME", "mallbyte_db"),
-        "USER": os.getenv("DB_USER", "root"),
+        "USER": os.getenv("DB_USER", "postgres"),
         "PASSWORD": os.getenv("DB_PASSWORD", ""),
         "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "3306"),
-        "OPTIONS": {
-            "charset": os.getenv("DB_CHARSET", "utf8mb4"),
-            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
-        },
+        "PORT": os.getenv("DB_PORT", "5432"),
     }
 }
 # Cache settings for Redis
