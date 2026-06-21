@@ -6,6 +6,7 @@ __pycache__/
 *.pyd
 *.env
 venv/
+.venv/
 .env/
 *.swp
 setupfarsi.txt
@@ -28,4 +29,7 @@ staticfiles/
 Thumbs.db
 
 
-.ruff_cache
+.ruff_cache.venv/
+venv/
+__pycache__/
+*.pyc
