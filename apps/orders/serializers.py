@@ -1,10 +1,12 @@
+from attr import attrs
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
 from apps.inventory.models import Stock
 from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatusHistory
 from apps.products.models import Product
-
+from apps.discounts.services import apply_discount_to_order, validate_discount_for_cart
 
 # ============================================================
 # Cart Item Serializer
@@ -349,6 +351,13 @@ class CheckoutSerializer(serializers.Serializer):
     postal_code = serializers.CharField(max_length=20)
     customer_note = serializers.CharField(required=False, allow_blank=True)
 
+    discount_code = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        write_only=True,
+    )
+
     shipping_cost = serializers.DecimalField(
         max_digits=12,
         decimal_places=0,
@@ -378,6 +387,30 @@ class CheckoutSerializer(serializers.Serializer):
                     }
                 )
 
+        discount_code = attrs.get("discount_code", "").strip()
+
+        if discount_code:
+            try:
+                discount, discount_amount = validate_discount_for_cart(
+                    code=discount_code,
+                    user=user,
+                    cart=cart,
+                )
+            except DjangoValidationError as exc:
+                message = exc.messages[0] if hasattr(exc, "messages") else str(exc)
+
+                raise serializers.ValidationError(
+                    {
+                        "discount_code": message,
+                    }
+                )
+
+            attrs["discount"] = discount
+            attrs["discount_amount"] = discount_amount
+        else:
+            attrs["discount"] = None
+            attrs["discount_amount"] = 0
+
         attrs["cart"] = cart
         return attrs
 
@@ -387,11 +420,16 @@ class CheckoutSerializer(serializers.Serializer):
 
         Important:
         - We reserve stock here.
+        - Discount is applied before payment.
         - Payment will be handled later in payments app.
         """
         request = self.context["request"]
         user = request.user
         cart = validated_data.pop("cart")
+
+        discount = validated_data.pop("discount", None)
+        validated_data.pop("discount_amount", 0)
+        validated_data.pop("discount_code", "")
 
         shipping_cost = validated_data.pop("shipping_cost", 0)
 
@@ -399,6 +437,7 @@ class CheckoutSerializer(serializers.Serializer):
             order = Order.objects.create(
                 user=user,
                 subtotal=cart.subtotal,
+                discount_amount=0,
                 shipping_cost=shipping_cost,
                 receiver_name=validated_data["receiver_name"],
                 receiver_phone=validated_data["receiver_phone"],
@@ -426,6 +465,15 @@ class CheckoutSerializer(serializers.Serializer):
                     unit_price=cart_item.unit_price,
                     total_price=cart_item.total_price,
                 )
+
+            if discount is not None:
+                apply_discount_to_order(
+                    discount=discount,
+                    user=user,
+                    cart=cart,
+                    order=order,
+                )
+                order.refresh_from_db()
 
             OrderStatusHistory.objects.create(
                 order=order,
