@@ -188,3 +188,74 @@ class CheckoutDiscountIntegrationTests(APITestCase):
 
         self.cart.refresh_from_db()
         self.assertEqual(self.cart.items.count(), 1)
+
+
+    def test_cancel_order_releases_discount_usage(self):
+        url = reverse("order-checkout")
+
+        response = self.client.post(
+            url,
+            data={
+                "receiver_name": "Test Customer",
+                "receiver_phone": "+989222222222",
+                "province": "Tehran",
+                "city": "Tehran",
+                "address": "Test address",
+                "postal_code": "1234567890",
+                "shipping_cost": "0",
+                "discount_code": "TEST10",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        order = Order.objects.get(user=self.customer)
+
+        self.discount.refresh_from_db()
+        self.assertEqual(self.discount.used_count, 1)
+        self.assertTrue(DiscountUsage.objects.filter(order=order).exists())
+
+        cancel_url = reverse("order-cancel", args=[order.id])
+
+        cancel_response = self.client.post(
+            cancel_url,
+            data={},
+            format="json",
+        )
+
+        self.assertEqual(cancel_response.status_code, status.HTTP_200_OK)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.StatusChoices.CANCELLED)
+
+        self.discount.refresh_from_db()
+        self.assertEqual(self.discount.used_count, 0)
+        self.assertFalse(DiscountUsage.objects.filter(order=order).exists())
+
+        CartItem.objects.create(
+            cart=self.cart,
+            product=self.product,
+            quantity=1,
+            unit_price=self.product.final_price,
+        )
+
+        second_response = self.client.post(
+            url,
+            data={
+                "receiver_name": "Test Customer",
+                "receiver_phone": "+989222222222",
+                "province": "Tehran",
+                "city": "Tehran",
+                "address": "Test address again",
+                "postal_code": "1234567890",
+                "shipping_cost": "0",
+                "discount_code": "TEST10",
+            },
+            format="json",
+        )
+
+        self.assertEqual(second_response.status_code, status.HTTP_201_CREATED)
+
+        self.discount.refresh_from_db()
+        self.assertEqual(self.discount.used_count, 1)

@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.products.models import Product
@@ -315,6 +315,29 @@ class Order(models.Model):
                 stock.release_reservation(
                     quantity=item.quantity,
                     user=user,
+                )
+            # Release discount usage if this order used a discount.
+            # This allows the customer to use the same coupon again
+            # when usage_limit_per_user is 1 and the order is cancelled.
+            from apps.discounts.models import Discount, DiscountUsage
+
+            usage = (
+                DiscountUsage.objects
+                .select_for_update()
+                .filter(order=order)
+                .select_related("discount")
+                .first()
+            )
+
+            if usage:
+                discount_id = usage.discount_id
+                usage.delete()
+
+                Discount.objects.filter(
+                    pk=discount_id,
+                    used_count__gt=0,
+                ).update(
+                    used_count=F("used_count") - 1
                 )
 
             order.status = self.StatusChoices.CANCELLED
