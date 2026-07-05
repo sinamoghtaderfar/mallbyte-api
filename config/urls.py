@@ -39,6 +39,8 @@ urlpatterns = [
     path("api/shipping/", include("apps.shipping.urls")),
 
     path("api/discounts/", include("apps.discounts.urls")),
+
+    path("api/returns/", include("apps.returns.urls")),
 ]
 
 
