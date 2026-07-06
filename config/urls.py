@@ -28,19 +28,15 @@ urlpatterns = [
     path(
         "swagger/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"
     ),
-    path('api/rbac/', include('apps.rbac.urls')),
-    path('api/products/', include('apps.products.urls')),
+    path("api/rbac/", include("apps.rbac.urls")),
+    path("api/products/", include("apps.products.urls")),
     path("api/inventory/", include("apps.inventory.urls")),
-    
     path("api/orders/", include("apps.orders.urls")),
-    
     path("api/payments/", include("apps.payments.urls")),
-
     path("api/shipping/", include("apps.shipping.urls")),
-
     path("api/discounts/", include("apps.discounts.urls")),
-
     path("api/returns/", include("apps.returns.urls")),
+    path("api/notifications/", include("apps.notifications.urls")),
 ]
 
 

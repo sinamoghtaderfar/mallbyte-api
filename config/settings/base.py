@@ -42,17 +42,18 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "drf_spectacular",
-    'django_extensions',
+    "django_extensions",
     # Local apps
     "apps.accounts",
     "apps.rbac",
-    'apps.products',
-    'apps.inventory',
+    "apps.products",
+    "apps.inventory",
     "apps.orders",
     "apps.payments",
     "apps.shipping",
     "apps.discounts",
     "apps.returns",
+    "apps.notifications",
 ]
 
 MIDDLEWARE = [
@@ -99,27 +100,28 @@ DATABASES = {
 }
 # Cache settings for Redis
 CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',  
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'SOCKET_CONNECT_TIMEOUT': 5,
-            'SOCKET_TIMEOUT': 5,
-            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
-        }
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "SOCKET_CONNECT_TIMEOUT": 5,
+            "SOCKET_TIMEOUT": 5,
+            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+        },
     }
 }
 ##########################
 if DEBUG:
     try:
         import redis
-        r = redis.Redis(host='localhost', port=6379, socket_connect_timeout=2)
+
+        r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
         r.ping()
     except:
         CACHES = {
-            'default': {
-                'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            "default": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
             }
         }
         print(" Redis not available, using local memory cache")
@@ -196,13 +198,15 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 
-# Email settings 
+# Email settings
 
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
-EMAIL_HOST = os.getenv('EMAIL_HOST')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@mallbyte.com')
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@mallbyte.com")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
