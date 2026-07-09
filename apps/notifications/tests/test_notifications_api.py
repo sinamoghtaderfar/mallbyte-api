@@ -94,19 +94,16 @@ class NotificationAPITests(APITestCase):
     def get_response_items(self, response) -> list[dict[str, Any]]:
         data = response.json()
 
-        # If pagination is enabled:
-        # {
-        #   "count": 3,
-        #   "next": null,
-        #   "previous": null,
-        #   "results": [...]
-        # }
         if isinstance(data, dict) and "results" in data:
-            return data["results"]
+            results = data["results"]
+            if isinstance(results, list):
+                return results
+            return []
 
-        # If pagination is disabled:
-        # [...]
-        return data
+        if isinstance(data, list):
+            return data
+
+        return []
 
     def test_user_can_list_only_own_notifications(self):
         self.authenticate_user()
