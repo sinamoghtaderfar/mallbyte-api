@@ -1,16 +1,18 @@
-from attr import attrs
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from apps.inventory.models import Stock
-from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatusHistory
-from apps.products.models import Product
 from apps.discounts.services import apply_discount_to_order, validate_discount_for_cart
+from apps.inventory.models import Stock
+from apps.notifications.models import Notification
+from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatusHistory
+from apps.orders.services import create_order_notification
+from apps.products.models import Product
 
 # ============================================================
 # Cart Item Serializer
 # ============================================================
+
 
 class CartItemSerializer(serializers.ModelSerializer):
     """
@@ -56,6 +58,7 @@ class CartItemSerializer(serializers.ModelSerializer):
 # Cart Serializer
 # ============================================================
 
+
 class CartSerializer(serializers.ModelSerializer):
     """
     Shows the user's cart with all items.
@@ -95,6 +98,7 @@ class CartSerializer(serializers.ModelSerializer):
 # Add To Cart Serializer
 # ============================================================
 
+
 class AddToCartSerializer(serializers.Serializer):
     """
     Input serializer for adding product to cart.
@@ -132,9 +136,7 @@ class AddToCartSerializer(serializers.Serializer):
 
         if product.available_stock < quantity:
             raise serializers.ValidationError(
-                {
-                    "quantity": "Not enough available stock."
-                }
+                {"quantity": "Not enough available stock."}
             )
 
         return attrs
@@ -143,6 +145,7 @@ class AddToCartSerializer(serializers.Serializer):
 # ============================================================
 # Update Cart Item Serializer
 # ============================================================
+
 
 class UpdateCartItemSerializer(serializers.Serializer):
     """
@@ -162,9 +165,7 @@ class UpdateCartItemSerializer(serializers.Serializer):
 
         if cart_item and cart_item.product.available_stock < quantity:
             raise serializers.ValidationError(
-                {
-                    "quantity": "Not enough available stock."
-                }
+                {"quantity": "Not enough available stock."}
             )
 
         return attrs
@@ -173,6 +174,7 @@ class UpdateCartItemSerializer(serializers.Serializer):
 # ============================================================
 # Order Item Serializer
 # ============================================================
+
 
 class OrderItemSerializer(serializers.ModelSerializer):
     """
@@ -204,6 +206,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 # Order Status History Serializer
 # ============================================================
 
+
 class OrderStatusHistorySerializer(serializers.ModelSerializer):
     """
     Shows status changes of an order.
@@ -228,6 +231,7 @@ class OrderStatusHistorySerializer(serializers.ModelSerializer):
 # ============================================================
 # Order List Serializer
 # ============================================================
+
 
 class OrderListSerializer(serializers.ModelSerializer):
     """
@@ -266,6 +270,7 @@ class OrderListSerializer(serializers.ModelSerializer):
 # ============================================================
 # Order Detail Serializer
 # ============================================================
+
 
 class OrderDetailSerializer(serializers.ModelSerializer):
     """
@@ -321,6 +326,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
 # ============================================================
 # Checkout Serializer
 # ============================================================
+
 
 class CheckoutSerializer(serializers.Serializer):
     """
@@ -382,9 +388,7 @@ class CheckoutSerializer(serializers.Serializer):
         for item in cart.items.select_related("product"):
             if item.product.available_stock < item.quantity:
                 raise serializers.ValidationError(
-                    {
-                        "stock": f"Not enough stock for {item.product.name}."
-                    }
+                    {"stock": f"Not enough stock for {item.product.name}."}
                 )
 
         discount_code = attrs.get("discount_code", "").strip()
@@ -482,7 +486,13 @@ class CheckoutSerializer(serializers.Serializer):
                 changed_by=user,
                 note="Order created from cart.",
             )
-
+            create_order_notification(
+                user=user,
+                order=order,
+                title="Order created",
+                message=f"Your order {order.order_number} has been created.",
+                priority=Notification.Priority.NORMAL,
+            )
             cart.clear()
 
         return order
@@ -498,8 +508,7 @@ class CheckoutSerializer(serializers.Serializer):
         """
 
         stocks = (
-            Stock.objects
-            .select_related("warehouse")
+            Stock.objects.select_related("warehouse")
             .filter(product=product, warehouse__is_active=True)
             .order_by("id")
         )
@@ -511,15 +520,14 @@ class CheckoutSerializer(serializers.Serializer):
                 return stock
 
         raise serializers.ValidationError(
-            {
-                "stock": f"Not enough stock for {product.name}."
-            }
+            {"stock": f"Not enough stock for {product.name}."}
         )
 
 
 # ============================================================
 # Order Status Update Serializer
 # ============================================================
+
 
 class OrderStatusUpdateSerializer(serializers.Serializer):
     """

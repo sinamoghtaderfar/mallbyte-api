@@ -3,17 +3,15 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-
-from requests import request
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.notifications.models import Notification
 from apps.orders.models import Cart, CartItem, Order, OrderStatusHistory
 from apps.orders.serializers import (
     AddToCartSerializer,
-    CartItemSerializer,
     CartSerializer,
     CheckoutSerializer,
     OrderDetailSerializer,
@@ -21,12 +19,13 @@ from apps.orders.serializers import (
     OrderStatusUpdateSerializer,
     UpdateCartItemSerializer,
 )
+from apps.orders.services import create_order_notification
 from apps.rbac.permissions import IsProductAdmin
-
 
 # ============================================================
 # Cart ViewSet
 # ============================================================
+
 
 class CartViewSet(viewsets.GenericViewSet):
     """
@@ -103,10 +102,10 @@ class CartViewSet(viewsets.GenericViewSet):
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(
-    detail=False,
-    methods=["patch", "delete"],
-    url_path=r"items/(?P<item_id>[^/.]+)",
-)
+        detail=False,
+        methods=["patch", "delete"],
+        url_path=r"items/(?P<item_id>[^/.]+)",
+    )
     def item_detail(self, request, item_id=None):
         """
         Update or remove one cart item.
@@ -139,7 +138,7 @@ class CartViewSet(viewsets.GenericViewSet):
 
         response_serializer = CartSerializer(cart)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
-    
+
     @action(detail=False, methods=["delete"], url_path="clear")
     def clear_cart(self, request):
         """
@@ -157,6 +156,7 @@ class CartViewSet(viewsets.GenericViewSet):
 # ============================================================
 # Order ViewSet
 # ============================================================
+
 
 class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -270,7 +270,13 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
             changed_by=request.user,
             note="Order cancelled.",
         )
-
+        create_order_notification(
+            user=order.user,
+            order=order,
+            title="Order cancelled",
+            message=f"Your order {order.order_number} has been cancelled.",
+            priority=Notification.Priority.HIGH,
+        )
         order.refresh_from_db()
         response_serializer = OrderDetailSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
@@ -309,5 +315,13 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         order.refresh_from_db()
+        if new_status != Order.StatusChoices.PAID:
+            create_order_notification(
+                user=order.user,
+                order=order,
+                title="Order status updated",
+                message=f"Your order {order.order_number} status changed to {order.get_status_display()}.",
+                priority=Notification.Priority.NORMAL,
+            )
         response_serializer = OrderDetailSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
