@@ -1,12 +1,12 @@
 # apps/payments/views.py
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.notifications.models import Notification
 from apps.payments.models import Payment, PaymentEvent
 from apps.payments.serializers import (
     PaymentCancelSerializer,
@@ -16,6 +16,7 @@ from apps.payments.serializers import (
     PaymentListSerializer,
     PaymentSuccessSerializer,
 )
+from apps.payments.services import create_payment_notification
 
 
 class PaymentViewSet(
@@ -150,6 +151,14 @@ class PaymentViewSet(
             },
         )
 
+        create_payment_notification(
+            user=payment.user,
+            payment=payment,
+            title="Payment successful",
+            message=f"Your payment {payment.payment_number} for order {payment.order.order_number} was successful.",
+            priority=Notification.Priority.HIGH,
+        )
+
         response_serializer = PaymentDetailSerializer(payment)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -199,6 +208,14 @@ class PaymentViewSet(
             },
         )
 
+        create_payment_notification(
+            user=payment.user,
+            payment=payment,
+            title="Payment failed",
+            message=f"Your payment {payment.payment_number} for order {payment.order.order_number} failed.",
+            priority=Notification.Priority.HIGH,
+        )
+
         response_serializer = PaymentDetailSerializer(payment)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -239,6 +256,14 @@ class PaymentViewSet(
             message=reason or "Payment cancelled.",
             created_by=request.user,
             data={},
+        )
+
+        create_payment_notification(
+            user=payment.user,
+            payment=payment,
+            title="Payment cancelled",
+            message=f"Your payment {payment.payment_number} for order {payment.order.order_number} was cancelled.",
+            priority=Notification.Priority.NORMAL,
         )
 
         response_serializer = PaymentDetailSerializer(payment)
