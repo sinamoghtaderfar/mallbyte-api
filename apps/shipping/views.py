@@ -1,18 +1,18 @@
-#Create shipment from paid order
-#List shipments
-#Retrieve shipment detail
-#Mark ready
-#Mark shipped
-#Mark delivered
-#Cancel shipment
+# Create shipment from paid order
+# List shipments
+# Retrieve shipment detail
+# Mark ready
+# Mark shipped
+# Mark delivered
+# Cancel shipment
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.notifications.models import Notification
 from apps.shipping.models import Shipment
 from apps.shipping.serializers import (
     ShipmentCancelSerializer,
@@ -23,6 +23,7 @@ from apps.shipping.serializers import (
     ShipmentMarkReadySerializer,
     ShipmentMarkShippedSerializer,
 )
+from apps.shipping.services import create_shipment_notification
 
 
 class ShipmentViewSet(
@@ -159,7 +160,13 @@ class ShipmentViewSet(
         serializer.is_valid(raise_exception=True)
 
         shipment = serializer.save()
-
+        create_shipment_notification(
+            user=shipment.user,
+            shipment=shipment,
+            title="Shipment created",
+            message=f"Shipment {shipment.shipment_number} has been created for your order {shipment.order.order_number}.",
+            priority=Notification.Priority.NORMAL,
+        )
         response_serializer = ShipmentDetailSerializer(shipment)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -198,6 +205,14 @@ class ShipmentViewSet(
                 {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        create_shipment_notification(
+            user=shipment.user,
+            shipment=shipment,
+            title="Shipment ready",
+            message=f"Shipment {shipment.shipment_number} is ready to ship.",
+            priority=Notification.Priority.NORMAL,
+        )
 
         response_serializer = ShipmentDetailSerializer(shipment)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
@@ -238,6 +253,13 @@ class ShipmentViewSet(
                 note=note,
             )
             shipment.refresh_from_db()
+            create_shipment_notification(
+                user=shipment.user,
+                shipment=shipment,
+                title="Shipment shipped",
+                message=f"Shipment {shipment.shipment_number} for order {shipment.order.order_number} has been shipped.",
+                priority=Notification.Priority.HIGH,
+            )
         except DjangoValidationError as exc:
             return Response(
                 {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
@@ -277,6 +299,13 @@ class ShipmentViewSet(
                 note=note,
             )
             shipment.refresh_from_db()
+            create_shipment_notification(
+                user=shipment.user,
+                shipment=shipment,
+                title="Shipment delivered",
+                message=f"Shipment {shipment.shipment_number} for order {shipment.order.order_number} has been delivered.",
+                priority=Notification.Priority.HIGH,
+            )
         except DjangoValidationError as exc:
             return Response(
                 {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
@@ -316,6 +345,13 @@ class ShipmentViewSet(
                 note=note,
             )
             shipment.refresh_from_db()
+            create_shipment_notification(
+                user=shipment.user,
+                shipment=shipment,
+                title="Shipment cancelled",
+                message=f"Shipment {shipment.shipment_number} for order {shipment.order.order_number} has been cancelled.",
+                priority=Notification.Priority.NORMAL,
+            )
         except DjangoValidationError as exc:
             return Response(
                 {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
