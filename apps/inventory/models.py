@@ -1,10 +1,10 @@
 # apps/inventory/models.py
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
-from django.contrib.auth import get_user_model
 
 from apps.products.models import Product
 
@@ -162,7 +162,9 @@ class Stock(models.Model):
     def clean(self):
         if self.reserved_quantity > self.quantity:
             raise ValidationError(
-                {"reserved_quantity": "Reserved quantity cannot be greater than total quantity."}
+                {
+                    "reserved_quantity": "Reserved quantity cannot be greater than total quantity."
+                }
             )
 
     def reserve(self, quantity, user=None):
@@ -178,7 +180,9 @@ class Stock(models.Model):
 
             stock.reserved_quantity += quantity
             stock.updated_by = user
-            stock.save(update_fields=["reserved_quantity", "updated_by", "last_updated"])
+            stock.save(
+                update_fields=["reserved_quantity", "updated_by", "last_updated"]
+            )
 
             self.reserved_quantity = stock.reserved_quantity
             self.quantity = stock.quantity
@@ -198,7 +202,9 @@ class Stock(models.Model):
 
             stock.reserved_quantity -= quantity
             stock.updated_by = user
-            stock.save(update_fields=["reserved_quantity", "updated_by", "last_updated"])
+            stock.save(
+                update_fields=["reserved_quantity", "updated_by", "last_updated"]
+            )
 
             self.reserved_quantity = stock.reserved_quantity
             self.quantity = stock.quantity
@@ -262,8 +268,12 @@ class StockMovement(models.Model):
     reason = models.TextField(blank=True, verbose_name="Reason")
 
     # Audit fields
-    before_quantity = models.PositiveIntegerField(default=0, verbose_name="Before Quantity")
-    after_quantity = models.PositiveIntegerField(default=0, verbose_name="After Quantity")
+    before_quantity = models.PositiveIntegerField(
+        default=0, verbose_name="Before Quantity"
+    )
+    after_quantity = models.PositiveIntegerField(
+        default=0, verbose_name="After Quantity"
+    )
 
     # Metadata
     created_by = models.ForeignKey(
@@ -303,12 +313,16 @@ class StockMovement(models.Model):
 
         if self.movement_type in self.INCREASE_TYPES and self.quantity < 0:
             raise ValidationError(
-                {"quantity": f"{self.get_movement_type_display()} must have a positive quantity."}
+                {
+                    "quantity": f"{self.get_movement_type_display()} must have a positive quantity."
+                }
             )
 
         if self.movement_type in self.DECREASE_TYPES and self.quantity > 0:
             raise ValidationError(
-                {"quantity": f"{self.get_movement_type_display()} must have a negative quantity."}
+                {
+                    "quantity": f"{self.get_movement_type_display()} must have a negative quantity."
+                }
             )
 
     def _validate_immutable_fields(self):
@@ -373,6 +387,13 @@ class StockMovement(models.Model):
 
             super().save(*args, **kwargs)
 
+            from apps.inventory.services import create_low_stock_notification_if_needed
+
+            create_low_stock_notification_if_needed(
+                stock=stock,
+                movement=self,
+            )
+
 
 class StockTransfer(models.Model):
     """Transfer stock between two warehouses."""
@@ -411,9 +432,13 @@ class StockTransfer(models.Model):
     )
 
     # Tracking
-    tracking_number = models.CharField(max_length=100, blank=True, verbose_name="Tracking Number")
+    tracking_number = models.CharField(
+        max_length=100, blank=True, verbose_name="Tracking Number"
+    )
     shipped_at = models.DateTimeField(null=True, blank=True, verbose_name="Shipped At")
-    delivered_at = models.DateTimeField(null=True, blank=True, verbose_name="Delivered At")
+    delivered_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Delivered At"
+    )
 
     # Metadata
     reason = models.TextField(blank=True, verbose_name="Reason")
@@ -468,11 +493,15 @@ class StockTransfer(models.Model):
         if self.from_warehouse_id and self.to_warehouse_id:
             if self.from_warehouse_id == self.to_warehouse_id:
                 raise ValidationError(
-                    {"to_warehouse": "Source and destination warehouses cannot be the same."}
+                    {
+                        "to_warehouse": "Source and destination warehouses cannot be the same."
+                    }
                 )
 
         if self.quantity <= 0:
-            raise ValidationError({"quantity": "Transfer quantity must be greater than zero."})
+            raise ValidationError(
+                {"quantity": "Transfer quantity must be greater than zero."}
+            )
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -484,7 +513,9 @@ class StockTransfer(models.Model):
             transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
 
             if transfer.status != self.StatusChoices.PENDING:
-                raise ValidationError("Only pending transfers can be marked as in transit.")
+                raise ValidationError(
+                    "Only pending transfers can be marked as in transit."
+                )
 
             transfer.status = self.StatusChoices.IN_TRANSIT
             transfer.shipped_at = timezone.now()
