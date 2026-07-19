@@ -115,7 +115,7 @@ class InventoryNotificationTests(TestCase):
         self.assertTrue(
             Notification.objects.filter(
                 user=self.seller,
-                notification_type=Notification.NotificationType.SYSTEM,
+                notification_type=Notification.NotificationType.INVENTORY,
                 related_object_type="stock",
                 related_object_id=str(stock.pk),
                 title="Low stock alert",

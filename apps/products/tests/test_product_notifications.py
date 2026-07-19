@@ -93,7 +93,7 @@ class ProductNotificationTests(APITestCase):
         self.assertTrue(
             Notification.objects.filter(
                 user=self.seller_user,
-                notification_type=Notification.NotificationType.SYSTEM,
+                notification_type=Notification.NotificationType.PRODUCT,
                 related_object_type="product",
                 related_object_id=str(product.pk),
                 title=title,

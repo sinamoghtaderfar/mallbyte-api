@@ -11,6 +11,8 @@ class Notification(models.Model):
         RETURN = "return", "Return"
         DISCOUNT = "discount", "Discount"
         SYSTEM = "system", "System"
+        PRODUCT = "product", "Product"
+        INVENTORY = "inventory", "Inventory"
 
     class Channel(models.TextChoices):
         IN_APP = "in_app", "In App"

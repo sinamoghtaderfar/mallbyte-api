@@ -21,7 +21,7 @@ def create_product_notification(
         user=user,
         title=title,
         message=message,
-        notification_type=Notification.NotificationType.SYSTEM,
+        notification_type=Notification.NotificationType.PRODUCT,
         priority=priority,
         related_object_type="product",
         related_object_id=str(product.pk),

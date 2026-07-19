@@ -79,7 +79,7 @@ class NotificationAPITests(APITestCase):
             user=self.other_user,
             title="Other user notification",
             message="This notification belongs to another user.",
-            notification_type=Notification.NotificationType.SYSTEM,
+            notification_type=Notification.NotificationType.PRODUCT,
         )
 
     def get_api_client(self) -> APIClient:

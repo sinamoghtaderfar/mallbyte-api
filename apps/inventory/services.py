@@ -28,7 +28,7 @@ def create_low_stock_notification_if_needed(*, stock, movement):
             f"Product {product.name} is low in stock at "
             f"{stock.warehouse.name}. Available quantity: {after_available}."
         ),
-        notification_type=Notification.NotificationType.SYSTEM,
+        notification_type=Notification.NotificationType.INVENTORY,
         priority=Notification.Priority.HIGH,
         related_object_type="stock",
         related_object_id=str(stock.pk),
