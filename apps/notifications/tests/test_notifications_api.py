@@ -234,3 +234,137 @@ class NotificationAPITests(APITestCase):
         self.assertIn(self.notification.pk, ids)
         self.assertIn(self.read_notification.pk, ids)
         self.assertIn(self.other_notification.pk, ids)
+
+    def test_user_can_filter_notifications_by_is_read_false(self):
+        unread_notification = Notification.objects.create(
+            user=self.user,
+            title="Unread notification",
+            message="Unread message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        read_notification = Notification.objects.create(
+            user=self.user,
+            title="Read notification",
+            message="Read message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-list")
+
+        response = self.client.get(url, {"is_read": "false"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        items = self.get_response_items(response)
+        titles = [item["title"] for item in items]
+
+        self.assertIn(unread_notification.title, titles)
+        self.assertNotIn(read_notification.title, titles)
+
+    def test_user_can_filter_notifications_by_is_read_true(self):
+        unread_notification = Notification.objects.create(
+            user=self.user,
+            title="Unread notification",
+            message="Unread message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        read_notification = Notification.objects.create(
+            user=self.user,
+            title="Read notification",
+            message="Read message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-list")
+
+        response = self.client.get(url, {"is_read": "true"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        items = self.get_response_items(response)
+        titles = [item["title"] for item in items]
+
+        self.assertIn(read_notification.title, titles)
+        self.assertNotIn(unread_notification.title, titles)
+
+    def test_user_can_filter_notifications_by_notification_type(self):
+        product_notification = Notification.objects.create(
+            user=self.user,
+            title="Product notification",
+            message="Product message",
+            notification_type=Notification.NotificationType.PRODUCT,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        order_notification = Notification.objects.create(
+            user=self.user,
+            title="Order notification",
+            message="Order message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-list")
+
+        response = self.client.get(
+            url,
+            {"notification_type": Notification.NotificationType.PRODUCT},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        items = self.get_response_items(response)
+        titles = [item["title"] for item in items]
+
+        self.assertIn(product_notification.title, titles)
+        self.assertNotIn(order_notification.title, titles)
+
+    def test_user_can_filter_notifications_by_priority(self):
+        high_notification = Notification.objects.create(
+            user=self.user,
+            title="High priority notification",
+            message="High priority message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.HIGH,
+        )
+
+        normal_notification = Notification.objects.create(
+            user=self.user,
+            title="Normal priority notification",
+            message="Normal priority message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-list")
+
+        response = self.client.get(
+            url,
+            {"priority": Notification.Priority.HIGH},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        items = self.get_response_items(response)
+        titles = [item["title"] for item in items]
+
+        self.assertIn(high_notification.title, titles)
+        self.assertNotIn(normal_notification.title, titles)

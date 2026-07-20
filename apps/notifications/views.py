@@ -1,7 +1,10 @@
+from typing import cast
+
 from django.contrib.auth.models import AnonymousUser
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.notifications.models import Notification
@@ -34,16 +37,39 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = Notification.objects.select_related("user").all()
-
         user = self.request.user
 
         if isinstance(user, AnonymousUser):
             return queryset.none()
 
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-            return queryset
+        if not (
+            getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+        ):
+            queryset = queryset.filter(user=user)
 
-        return queryset.filter(user=user)
+        request = cast(Request, self.request)
+
+        notification_type = request.query_params.get("notification_type")
+        channel = request.query_params.get("channel")
+        priority = request.query_params.get("priority")
+        is_read = request.query_params.get("is_read")
+
+        if notification_type:
+            queryset = queryset.filter(notification_type=notification_type)
+
+        if channel:
+            queryset = queryset.filter(channel=channel)
+
+        if priority:
+            queryset = queryset.filter(priority=priority)
+
+        if is_read is not None:
+            if is_read.lower() == "true":
+                queryset = queryset.filter(is_read=True)
+            elif is_read.lower() == "false":
+                queryset = queryset.filter(is_read=False)
+
+        return queryset
 
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
