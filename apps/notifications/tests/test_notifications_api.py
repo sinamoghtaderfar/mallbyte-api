@@ -368,3 +368,39 @@ class NotificationAPITests(APITestCase):
 
         self.assertIn(high_notification.title, titles)
         self.assertNotIn(normal_notification.title, titles)
+
+    def test_user_can_filter_notifications_by_channel(self):
+        in_app_notification = Notification.objects.create(
+            user=self.user,
+            title="In-app notification",
+            message="In-app message",
+            notification_type=Notification.NotificationType.ORDER,
+            channel=Notification.Channel.IN_APP,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        email_notification = Notification.objects.create(
+            user=self.user,
+            title="Email notification",
+            message="Email message",
+            notification_type=Notification.NotificationType.ORDER,
+            channel=Notification.Channel.EMAIL,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-list")
+
+        response = self.client.get(
+            url,
+            {"channel": Notification.Channel.IN_APP},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        items = self.get_response_items(response)
+        titles = [item["title"] for item in items]
+
+        self.assertIn(in_app_notification.title, titles)
+        self.assertNotIn(email_notification.title, titles)
