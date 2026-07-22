@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from apps.notifications.models import Notification
 from apps.notifications.serializers import NotificationSerializer
 from apps.notifications.services import (
+    delete_all_notifications,
     delete_read_notifications,
     get_unread_notification_count,
     mark_all_notifications_as_read,
@@ -134,6 +135,15 @@ class NotificationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["delete"], url_path="clear-read")
     def clear_read(self, request):
         deleted_count = delete_read_notifications(user=request.user)
+
+        return Response(
+            {"deleted_count": deleted_count},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["delete"], url_path="clear-all")
+    def clear_all(self, request):
+        deleted_count = delete_all_notifications(user=request.user)
 
         return Response(
             {"deleted_count": deleted_count},

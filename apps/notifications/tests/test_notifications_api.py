@@ -508,3 +508,56 @@ class NotificationAPITests(APITestCase):
         self.assertTrue(
             Notification.objects.filter(pk=other_user_read_notification.pk).exists()
         )
+
+    def test_user_can_clear_all_own_notifications(self):
+        notification_1 = Notification.objects.create(
+            user=self.user,
+            title="Notification 1",
+            message="Message 1",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        notification_2 = Notification.objects.create(
+            user=self.user,
+            title="Notification 2",
+            message="Message 2",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.HIGH,
+            is_read=False,
+        )
+
+        other_user_notification = Notification.objects.create(
+            user=self.other_user,
+            title="Other user notification",
+            message="Other user message",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        expected_deleted_count = Notification.objects.filter(
+            user=self.user,
+        ).count()
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-clear-all")
+
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["deleted_count"], expected_deleted_count)
+
+        self.assertFalse(Notification.objects.filter(pk=notification_1.pk).exists())
+        self.assertFalse(Notification.objects.filter(pk=notification_2.pk).exists())
+
+        self.assertTrue(
+            Notification.objects.filter(pk=other_user_notification.pk).exists()
+        )
+
+        self.assertFalse(Notification.objects.filter(user=self.user).exists())

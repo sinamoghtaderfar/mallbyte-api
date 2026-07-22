@@ -107,3 +107,12 @@ def delete_read_notifications(*, user):
     read_notifications.delete()
 
     return count
+
+
+def delete_all_notifications(*, user):
+    notifications = Notification.objects.filter(user=user)
+
+    count = notifications.count()
+    notifications.delete()
+
+    return count
