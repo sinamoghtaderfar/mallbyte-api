@@ -442,3 +442,69 @@ class NotificationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
         self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())
+
+    def test_user_can_clear_read_notifications(self):
+        read_notification_1 = Notification.objects.create(
+            user=self.user,
+            title="Read notification 1",
+            message="Read message 1",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        read_notification_2 = Notification.objects.create(
+            user=self.user,
+            title="Read notification 2",
+            message="Read message 2",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        unread_notification = Notification.objects.create(
+            user=self.user,
+            title="Unread notification",
+            message="Unread message",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        other_user_read_notification = Notification.objects.create(
+            user=self.other_user,
+            title="Other user read notification",
+            message="Other user read message",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        expected_deleted_count = Notification.objects.filter(
+            user=self.user,
+            is_read=True,
+        ).count()
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-clear-read")
+
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["deleted_count"], expected_deleted_count)
+
+        self.assertFalse(
+            Notification.objects.filter(pk=read_notification_1.pk).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(pk=read_notification_2.pk).exists()
+        )
+
+        self.assertTrue(Notification.objects.filter(pk=unread_notification.pk).exists())
+        self.assertTrue(
+            Notification.objects.filter(pk=other_user_read_notification.pk).exists()
+        )
