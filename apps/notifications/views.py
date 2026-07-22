@@ -17,7 +17,7 @@ from apps.notifications.services import (
 )
 
 
-class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+class NotificationViewSet(viewsets.ModelViewSet):
     """
     Notification API.
 
@@ -34,6 +34,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
         queryset = Notification.objects.select_related("user").all()

@@ -95,3 +95,15 @@ def get_unread_notification_count(*, user):
         user=user,
         is_read=False,
     ).count()
+
+
+def delete_read_notifications(*, user):
+    read_notifications = Notification.objects.filter(
+        user=user,
+        is_read=True,
+    )
+
+    count = read_notifications.count()
+    read_notifications.delete()
+
+    return count

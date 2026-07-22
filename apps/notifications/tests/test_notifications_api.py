@@ -404,3 +404,41 @@ class NotificationAPITests(APITestCase):
 
         self.assertIn(in_app_notification.title, titles)
         self.assertNotIn(email_notification.title, titles)
+
+    def test_user_can_delete_own_notification(self):
+        notification = Notification.objects.create(
+            user=self.user,
+            title="Delete me",
+            message="This notification should be deleted.",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-detail", args=[notification.pk])
+
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertFalse(Notification.objects.filter(pk=notification.pk).exists())
+
+    def test_user_cannot_delete_other_user_notification(self):
+        notification = Notification.objects.create(
+            user=self.other_user,
+            title="Other user notification",
+            message="This belongs to another user.",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-detail", args=[notification.pk])
+
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())
