@@ -561,3 +561,77 @@ class NotificationAPITests(APITestCase):
         )
 
         self.assertFalse(Notification.objects.filter(user=self.user).exists())
+
+    def test_user_can_get_notification_summary(self):
+        Notification.objects.create(
+            user=self.user,
+            title="Order notification",
+            message="Order message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        Notification.objects.create(
+            user=self.user,
+            title="Product notification",
+            message="Product message",
+            notification_type=Notification.NotificationType.PRODUCT,
+            priority=Notification.Priority.HIGH,
+            is_read=True,
+        )
+
+        Notification.objects.create(
+            user=self.user,
+            title="System notification",
+            message="System message",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        Notification.objects.create(
+            user=self.other_user,
+            title="Other user notification",
+            message="Other user message",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.URGENT,
+            is_read=False,
+        )
+
+        user_notifications = Notification.objects.filter(user=self.user)
+
+        expected_by_type = {}
+        for notification_type in user_notifications.values_list(
+            "notification_type",
+            flat=True,
+        ):
+            expected_by_type[notification_type] = (
+                expected_by_type.get(notification_type, 0) + 1
+            )
+
+        expected_by_priority = {}
+        for priority in user_notifications.values_list("priority", flat=True):
+            expected_by_priority[priority] = expected_by_priority.get(priority, 0) + 1
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-summary")
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["total_count"], user_notifications.count())
+        self.assertEqual(
+            data["unread_count"],
+            user_notifications.filter(is_read=False).count(),
+        )
+        self.assertEqual(
+            data["read_count"],
+            user_notifications.filter(is_read=True).count(),
+        )
+        self.assertEqual(data["by_type"], expected_by_type)
+        self.assertEqual(data["by_priority"], expected_by_priority)

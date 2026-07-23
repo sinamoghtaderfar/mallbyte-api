@@ -12,6 +12,7 @@ from apps.notifications.serializers import NotificationSerializer
 from apps.notifications.services import (
     delete_all_notifications,
     delete_read_notifications,
+    get_notification_summary,
     get_unread_notification_count,
     mark_all_notifications_as_read,
     mark_notification_as_read,
@@ -84,6 +85,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        summary_data = get_notification_summary(user=request.user)
+
+        return Response(summary_data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="mark-read")
     def mark_read(self, request, pk=None):

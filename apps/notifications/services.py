@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Count
 
 from apps.notifications.models import Notification
 
@@ -116,3 +117,31 @@ def delete_all_notifications(*, user):
     notifications.delete()
 
     return count
+
+
+def get_notification_summary(*, user):
+    notifications = Notification.objects.filter(user=user)
+
+    by_type = {
+        item["notification_type"]: item["count"]
+        for item in notifications.values("notification_type").annotate(
+            count=Count("id")
+        )
+    }
+
+    by_priority = {
+        item["priority"]: item["count"]
+        for item in notifications.values("priority").annotate(count=Count("id"))
+    }
+
+    total_count = notifications.count()
+    unread_count = notifications.filter(is_read=False).count()
+    read_count = notifications.filter(is_read=True).count()
+
+    return {
+        "total_count": total_count,
+        "unread_count": unread_count,
+        "read_count": read_count,
+        "by_type": by_type,
+        "by_priority": by_priority,
+    }
