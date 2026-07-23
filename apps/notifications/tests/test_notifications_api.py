@@ -841,3 +841,104 @@ class NotificationAPITests(APITestCase):
         data = response.json()
 
         self.assertEqual(data["detail"], "ids must be a list.")
+
+    def test_user_can_mark_selected_notifications_as_unread(self):
+        notification_1 = Notification.objects.create(
+            user=self.user,
+            title="Selected read notification 1",
+            message="Message 1",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        notification_2 = Notification.objects.create(
+            user=self.user,
+            title="Selected read notification 2",
+            message="Message 2",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.HIGH,
+            is_read=True,
+        )
+
+        notification_not_selected = Notification.objects.create(
+            user=self.user,
+            title="Not selected read notification",
+            message="Message 3",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        already_unread_notification = Notification.objects.create(
+            user=self.user,
+            title="Already unread notification",
+            message="Message 4",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        other_user_notification = Notification.objects.create(
+            user=self.other_user,
+            title="Other user read notification",
+            message="Other user message",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=True,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-unread")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [
+                    notification_1.pk,
+                    notification_2.pk,
+                    already_unread_notification.pk,
+                    other_user_notification.pk,
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["marked_count"], 2)
+
+        notification_1.refresh_from_db()
+        notification_2.refresh_from_db()
+        notification_not_selected.refresh_from_db()
+        already_unread_notification.refresh_from_db()
+        other_user_notification.refresh_from_db()
+
+        self.assertFalse(notification_1.is_read)
+        self.assertFalse(notification_2.is_read)
+
+        self.assertTrue(notification_not_selected.is_read)
+        self.assertFalse(already_unread_notification.is_read)
+        self.assertTrue(other_user_notification.is_read)
+
+    def test_mark_selected_unread_requires_ids_to_be_list(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-unread")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": "not-a-list",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids must be a list.")

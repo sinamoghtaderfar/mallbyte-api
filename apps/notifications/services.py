@@ -172,3 +172,18 @@ def delete_selected_notifications(*, user, notification_ids):
     notifications.delete()
 
     return count
+
+
+def mark_selected_notifications_as_unread(*, user, notification_ids):
+    notifications = Notification.objects.filter(
+        user=user,
+        id__in=notification_ids,
+        is_read=True,
+    )
+
+    count = notifications.count()
+
+    for notification in notifications:
+        notification.mark_as_unread()
+
+    return count
