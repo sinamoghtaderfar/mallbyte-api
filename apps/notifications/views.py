@@ -12,6 +12,7 @@ from apps.notifications.serializers import NotificationSerializer
 from apps.notifications.services import (
     delete_all_notifications,
     delete_read_notifications,
+    delete_selected_notifications,
     get_notification_summary,
     get_unread_notification_count,
     mark_all_notifications_as_read,
@@ -163,6 +164,26 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
         return Response(
             {"marked_count": marked_count},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="delete-selected")
+    def delete_selected(self, request):
+        notification_ids = request.data.get("ids", [])
+
+        if not isinstance(notification_ids, list):
+            return Response(
+                {"detail": "ids must be a list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deleted_count = delete_selected_notifications(
+            user=request.user,
+            notification_ids=notification_ids,
+        )
+
+        return Response(
+            {"deleted_count": deleted_count},
             status=status.HTTP_200_OK,
         )
 

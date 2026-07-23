@@ -160,3 +160,15 @@ def mark_selected_notifications_as_read(*, user, notification_ids):
         notification.mark_as_read()
 
     return count
+
+
+def delete_selected_notifications(*, user, notification_ids):
+    notifications = Notification.objects.filter(
+        user=user,
+        id__in=notification_ids,
+    )
+
+    count = notifications.count()
+    notifications.delete()
+
+    return count
