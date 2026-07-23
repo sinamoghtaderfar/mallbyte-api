@@ -145,3 +145,18 @@ def get_notification_summary(*, user):
         "by_type": by_type,
         "by_priority": by_priority,
     }
+
+
+def mark_selected_notifications_as_read(*, user, notification_ids):
+    notifications = Notification.objects.filter(
+        user=user,
+        id__in=notification_ids,
+        is_read=False,
+    )
+
+    count = notifications.count()
+
+    for notification in notifications:
+        notification.mark_as_read()
+
+    return count

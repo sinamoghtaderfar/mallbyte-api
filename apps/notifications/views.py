@@ -17,6 +17,7 @@ from apps.notifications.services import (
     mark_all_notifications_as_read,
     mark_notification_as_read,
     mark_notification_as_unread,
+    mark_selected_notifications_as_read,
 )
 
 
@@ -142,6 +143,26 @@ class NotificationViewSet(viewsets.ModelViewSet):
             {
                 "marked_count": marked_count,
             },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="mark-selected-read")
+    def mark_selected_read(self, request):
+        notification_ids = request.data.get("ids", [])
+
+        if not isinstance(notification_ids, list):
+            return Response(
+                {"detail": "ids must be a list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        marked_count = mark_selected_notifications_as_read(
+            user=request.user,
+            notification_ids=notification_ids,
+        )
+
+        return Response(
+            {"marked_count": marked_count},
             status=status.HTTP_200_OK,
         )
 
