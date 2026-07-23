@@ -75,6 +75,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Creating notifications directly is not allowed."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
         count = get_unread_notification_count(user=request.user)

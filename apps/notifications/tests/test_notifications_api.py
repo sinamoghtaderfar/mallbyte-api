@@ -635,3 +635,32 @@ class NotificationAPITests(APITestCase):
         )
         self.assertEqual(data["by_type"], expected_by_type)
         self.assertEqual(data["by_priority"], expected_by_priority)
+
+    def test_user_cannot_create_notification_directly_from_api(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        before_count = Notification.objects.count()
+
+        url = reverse("notification-list")
+
+        response = self.client.post(
+            url,
+            data={
+                "title": "Fake notification",
+                "message": "User should not be able to create this.",
+                "notification_type": Notification.NotificationType.SYSTEM,
+                "priority": Notification.Priority.NORMAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        data = response.json()
+
+        self.assertEqual(
+            data["detail"],
+            "Creating notifications directly is not allowed.",
+        )
+
+        self.assertEqual(Notification.objects.count(), before_count)
