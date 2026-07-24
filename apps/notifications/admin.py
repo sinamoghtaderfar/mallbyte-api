@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationPreference
 
 
 @admin.register(Notification)
@@ -56,3 +56,25 @@ class NotificationAdmin(admin.ModelAdmin):
     def mark_selected_as_unread(self, request, queryset):
         for notification in queryset:
             notification.mark_as_unread()
+
+
+@admin.register(NotificationPreference)
+class NotificationPreferenceAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "email_enabled",
+        "sms_enabled",
+        "push_enabled",
+        "in_app_enabled",
+        "created_at",
+    )
+    search_fields = (
+        "user__phone",
+        "user__email",
+        "user__full_name",
+    )
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
