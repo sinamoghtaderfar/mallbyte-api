@@ -942,3 +942,128 @@ class NotificationAPITests(APITestCase):
         data = response.json()
 
         self.assertEqual(data["detail"], "ids must be a list.")
+
+    def test_user_can_get_notification_preferences(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-preferences")
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["user"], str(self.user))
+        self.assertEqual(data["muted_notification_types"], [])
+        self.assertEqual(data["muted_channels"], [])
+        self.assertTrue(data["email_enabled"])
+        self.assertTrue(data["sms_enabled"])
+        self.assertTrue(data["push_enabled"])
+        self.assertTrue(data["in_app_enabled"])
+
+    def test_user_can_get_notification_preferences(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-preferences")
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["user"], str(self.user))
+        self.assertEqual(data["muted_notification_types"], [])
+        self.assertEqual(data["muted_channels"], [])
+        self.assertTrue(data["email_enabled"])
+        self.assertTrue(data["sms_enabled"])
+        self.assertTrue(data["push_enabled"])
+        self.assertTrue(data["in_app_enabled"])
+
+    def test_user_can_update_notification_preferences(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-preferences")
+
+        response = self.client.post(
+            url,
+            data={
+                "muted_notification_types": [
+                    Notification.NotificationType.PRODUCT,
+                    Notification.NotificationType.INVENTORY,
+                ],
+                "muted_channels": [
+                    Notification.Channel.EMAIL,
+                ],
+                "email_enabled": False,
+                "sms_enabled": True,
+                "push_enabled": True,
+                "in_app_enabled": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(
+            data["muted_notification_types"],
+            [
+                Notification.NotificationType.PRODUCT,
+                Notification.NotificationType.INVENTORY,
+            ],
+        )
+        self.assertEqual(
+            data["muted_channels"],
+            [
+                Notification.Channel.EMAIL,
+            ],
+        )
+        self.assertFalse(data["email_enabled"])
+        self.assertTrue(data["sms_enabled"])
+        self.assertTrue(data["push_enabled"])
+        self.assertTrue(data["in_app_enabled"])
+
+    def test_invalid_muted_notification_type_returns_bad_request(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-preferences")
+
+        response = self.client.post(
+            url,
+            data={
+                "muted_notification_types": [
+                    "invalid_type",
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertIn("muted_notification_types", data)
+
+    def test_invalid_muted_channel_returns_bad_request(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-preferences")
+
+        response = self.client.post(
+            url,
+            data={
+                "muted_channels": [
+                    "invalid_channel",
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertIn("muted_channels", data)

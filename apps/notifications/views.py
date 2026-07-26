@@ -7,8 +7,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.notifications.models import Notification
-from apps.notifications.serializers import NotificationSerializer
+from apps.notifications.models import Notification, NotificationPreference
+from apps.notifications.serializers import (
+    NotificationPreferenceSerializer,
+    NotificationSerializer,
+)
 from apps.notifications.services import (
     delete_all_notifications,
     delete_read_notifications,
@@ -100,6 +103,26 @@ class NotificationViewSet(viewsets.ModelViewSet):
         summary_data = get_notification_summary(user=request.user)
 
         return Response(summary_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get", "post"], url_path="preferences")
+    def preferences(self, request):
+        preference, _ = NotificationPreference.objects.get_or_create(
+            user=request.user,
+        )
+
+        if request.method == "GET":
+            serializer = NotificationPreferenceSerializer(preference)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = NotificationPreferenceSerializer(
+            preference,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="mark-read")
     def mark_read(self, request, pk=None):
