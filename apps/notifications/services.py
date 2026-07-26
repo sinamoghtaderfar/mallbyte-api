@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.db.models import Count
 
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationPreference
 
 
 def create_notification(
@@ -17,16 +17,20 @@ def create_notification(
     action_url="",
     metadata=None,
 ):
-    """
-    Create a notification for a user.
-
-    MVP:
-    - only creates in-app notification
-    - later we can add email / sms / push here
-    """
-
     if metadata is None:
         metadata = {}
+
+    preference, _ = NotificationPreference.objects.get_or_create(
+        user=user,
+    )
+
+    is_allowed = preference.is_notification_allowed(
+        notification_type=notification_type,
+        channel=channel,
+    )
+
+    if not is_allowed:
+        return None
 
     return Notification.objects.create(
         user=user,
