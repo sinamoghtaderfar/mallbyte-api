@@ -9,6 +9,7 @@ from rest_framework.response import Response
 
 from apps.notifications.models import Notification, NotificationPreference
 from apps.notifications.serializers import (
+    NotificationIdsSerializer,
     NotificationPreferenceSerializer,
     NotificationSerializer,
 )
@@ -86,6 +87,25 @@ class NotificationViewSet(viewsets.ModelViewSet):
             {"detail": "Creating notifications directly is not allowed."},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
+
+    def get_notification_ids_from_request(self, request):
+        serializer = NotificationIdsSerializer(data=request.data)
+
+        if not serializer.is_valid():
+            ids_errors = serializer.errors.get("ids")
+
+            if ids_errors:
+                return None, Response(
+                    {"detail": str(ids_errors[0])},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return None, Response(
+                {"detail": "Invalid request."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return serializer.validated_data["ids"], None
 
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
@@ -173,13 +193,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="mark-selected-read")
     def mark_selected_read(self, request):
-        notification_ids = request.data.get("ids", [])
+        notification_ids, error_response = self.get_notification_ids_from_request(
+            request
+        )
 
-        if not isinstance(notification_ids, list):
-            return Response(
-                {"detail": "ids must be a list."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if error_response is not None:
+            return error_response
 
         marked_count = mark_selected_notifications_as_read(
             user=request.user,
@@ -193,13 +212,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="mark-selected-unread")
     def mark_selected_unread(self, request):
-        notification_ids = request.data.get("ids", [])
+        notification_ids, error_response = self.get_notification_ids_from_request(
+            request
+        )
 
-        if not isinstance(notification_ids, list):
-            return Response(
-                {"detail": "ids must be a list."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if error_response is not None:
+            return error_response
 
         marked_count = mark_selected_notifications_as_unread(
             user=request.user,
@@ -213,13 +231,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="delete-selected")
     def delete_selected(self, request):
-        notification_ids = request.data.get("ids", [])
+        notification_ids, error_response = self.get_notification_ids_from_request(
+            request
+        )
 
-        if not isinstance(notification_ids, list):
-            return Response(
-                {"detail": "ids must be a list."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if error_response is not None:
+            return error_response
 
         deleted_count = delete_selected_notifications(
             user=request.user,

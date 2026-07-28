@@ -1067,3 +1067,108 @@ class NotificationAPITests(APITestCase):
         data = response.json()
 
         self.assertIn("muted_channels", data)
+
+    def test_mark_selected_read_rejects_empty_ids_list(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-read")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids cannot be empty.")
+
+    def test_mark_selected_read_rejects_non_integer_ids(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-read")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [1, "2", 3],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids must contain integers only.")
+
+    def test_mark_selected_read_rejects_negative_ids(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-read")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [1, -2, 3],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids must contain positive integers only.")
+
+    def test_mark_selected_read_removes_duplicate_ids(self):
+        notification_1 = Notification.objects.create(
+            user=self.user,
+            title="Duplicate notification 1",
+            message="Message 1",
+            notification_type=Notification.NotificationType.SYSTEM,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        notification_2 = Notification.objects.create(
+            user=self.user,
+            title="Duplicate notification 2",
+            message="Message 2",
+            notification_type=Notification.NotificationType.ORDER,
+            priority=Notification.Priority.NORMAL,
+            is_read=False,
+        )
+
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-read")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [
+                    notification_1.pk,
+                    notification_1.pk,
+                    notification_2.pk,
+                    notification_2.pk,
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response.json()
+
+        self.assertEqual(data["marked_count"], 2)
+
+        notification_1.refresh_from_db()
+        notification_2.refresh_from_db()
+
+        self.assertTrue(notification_1.is_read)
+        self.assertTrue(notification_2.is_read)

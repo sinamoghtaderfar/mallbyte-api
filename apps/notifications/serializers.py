@@ -100,3 +100,30 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"Invalid channels: {invalid_channels}")
 
         return value
+
+
+class NotificationIdsSerializer(serializers.Serializer):
+    ids = serializers.JSONField()
+
+    def validate_ids(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("ids must be a list.")
+
+        if not value:
+            raise serializers.ValidationError("ids cannot be empty.")
+
+        cleaned_ids = []
+
+        for item in value:
+            if not isinstance(item, int):
+                raise serializers.ValidationError("ids must contain integers only.")
+
+            if item <= 0:
+                raise serializers.ValidationError(
+                    "ids must contain positive integers only."
+                )
+
+            if item not in cleaned_ids:
+                cleaned_ids.append(item)
+
+        return cleaned_ids
