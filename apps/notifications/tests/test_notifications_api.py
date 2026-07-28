@@ -1172,3 +1172,79 @@ class NotificationAPITests(APITestCase):
 
         self.assertTrue(notification_1.is_read)
         self.assertTrue(notification_2.is_read)
+
+    def test_mark_selected_unread_rejects_empty_ids_list(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-unread")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids cannot be empty.")
+
+    def test_mark_selected_unread_rejects_non_integer_ids(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-mark-selected-unread")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [1, "2", 3],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids must contain integers only.")
+
+    def test_delete_selected_rejects_empty_ids_list(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-delete-selected")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids cannot be empty.")
+
+    def test_delete_selected_rejects_negative_ids(self):
+        self.get_api_client().force_authenticate(user=self.user)
+
+        url = reverse("notification-delete-selected")
+
+        response = self.client.post(
+            url,
+            data={
+                "ids": [1, -2, 3],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        data = response.json()
+
+        self.assertEqual(data["detail"], "ids must contain positive integers only.")
