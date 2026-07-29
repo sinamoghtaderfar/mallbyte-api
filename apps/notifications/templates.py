@@ -97,6 +97,18 @@ NOTIFICATION_TEMPLATES = {
         "notification_type": Notification.NotificationType.PAYMENT,
         "priority": Notification.Priority.HIGH,
     },
+    "shipment_ready": {
+        "title": "Shipment ready",
+        "message": "Your shipment for order #{order_id} is ready for shipping.",
+        "notification_type": Notification.NotificationType.SHIPPING,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "shipment_cancelled": {
+        "title": "Shipment cancelled",
+        "message": "Your shipment for order #{order_id} has been cancelled.",
+        "notification_type": Notification.NotificationType.SHIPPING,
+        "priority": Notification.Priority.HIGH,
+    },
 }
 
 

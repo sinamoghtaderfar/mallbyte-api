@@ -12,7 +12,6 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.notifications.models import Notification
 from apps.shipping.models import Shipment
 from apps.shipping.serializers import (
     ShipmentCancelSerializer,
@@ -161,11 +160,9 @@ class ShipmentViewSet(
 
         shipment = serializer.save()
         create_shipment_notification(
-            user=shipment.user,
             shipment=shipment,
-            title="Shipment created",
-            message=f"Shipment {shipment.shipment_number} has been created for your order {shipment.order.order_number}.",
-            priority=Notification.Priority.NORMAL,
+            template_key="shipment_created",
+            order_id=shipment.order.order_number,
         )
         response_serializer = ShipmentDetailSerializer(shipment)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
@@ -207,11 +204,9 @@ class ShipmentViewSet(
             )
 
         create_shipment_notification(
-            user=shipment.user,
             shipment=shipment,
-            title="Shipment ready",
-            message=f"Shipment {shipment.shipment_number} is ready to ship.",
-            priority=Notification.Priority.NORMAL,
+            template_key="shipment_ready",
+            order_id=shipment.order.order_number,
         )
 
         response_serializer = ShipmentDetailSerializer(shipment)
@@ -254,11 +249,9 @@ class ShipmentViewSet(
             )
             shipment.refresh_from_db()
             create_shipment_notification(
-                user=shipment.user,
                 shipment=shipment,
-                title="Shipment shipped",
-                message=f"Shipment {shipment.shipment_number} for order {shipment.order.order_number} has been shipped.",
-                priority=Notification.Priority.HIGH,
+                template_key="shipment_shipped",
+                order_id=shipment.order.order_number,
             )
         except DjangoValidationError as exc:
             return Response(
@@ -300,11 +293,9 @@ class ShipmentViewSet(
             )
             shipment.refresh_from_db()
             create_shipment_notification(
-                user=shipment.user,
                 shipment=shipment,
-                title="Shipment delivered",
-                message=f"Shipment {shipment.shipment_number} for order {shipment.order.order_number} has been delivered.",
-                priority=Notification.Priority.HIGH,
+                template_key="shipment_delivered",
+                order_id=shipment.order.order_number,
             )
         except DjangoValidationError as exc:
             return Response(
@@ -346,11 +337,9 @@ class ShipmentViewSet(
             )
             shipment.refresh_from_db()
             create_shipment_notification(
-                user=shipment.user,
                 shipment=shipment,
-                title="Shipment cancelled",
-                message=f"Shipment {shipment.shipment_number} for order {shipment.order.order_number} has been cancelled.",
-                priority=Notification.Priority.NORMAL,
+                template_key="shipment_cancelled",
+                order_id=shipment.order.order_number,
             )
         except DjangoValidationError as exc:
             return Response(
