@@ -85,6 +85,12 @@ NOTIFICATION_TEMPLATES = {
         "notification_type": Notification.NotificationType.RETURN,
         "priority": Notification.Priority.HIGH,
     },
+    "order_status_updated": {
+        "title": "Order status updated",
+        "message": "Your order #{order_id} status has been updated to {status_display}.",
+        "notification_type": Notification.NotificationType.ORDER,
+        "priority": Notification.Priority.NORMAL,
+    },
 }
 
 

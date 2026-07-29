@@ -8,7 +8,6 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.notifications.models import Notification
 from apps.orders.models import Cart, CartItem, Order, OrderStatusHistory
 from apps.orders.serializers import (
     AddToCartSerializer,
@@ -271,11 +270,9 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
             note="Order cancelled.",
         )
         create_order_notification(
-            user=order.user,
             order=order,
-            title="Order cancelled",
-            message=f"Your order {order.order_number} has been cancelled.",
-            priority=Notification.Priority.HIGH,
+            template_key="order_cancelled",
+            order_id=order.order_number,
         )
         order.refresh_from_db()
         response_serializer = OrderDetailSerializer(order)
@@ -317,11 +314,13 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         order.refresh_from_db()
         if new_status != Order.StatusChoices.PAID:
             create_order_notification(
-                user=order.user,
                 order=order,
-                title="Order status updated",
-                message=f"Your order {order.order_number} status changed to {order.get_status_display()}.",
-                priority=Notification.Priority.NORMAL,
+                template_key="order_status_updated",
+                order_id=order.order_number,
+                status_display=order.get_status_display(),
+                metadata={
+                    "status": order.status,
+                },
             )
         response_serializer = OrderDetailSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
