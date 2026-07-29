@@ -91,6 +91,12 @@ NOTIFICATION_TEMPLATES = {
         "notification_type": Notification.NotificationType.ORDER,
         "priority": Notification.Priority.NORMAL,
     },
+    "payment_cancelled": {
+        "title": "Payment cancelled",
+        "message": "Your payment for order #{order_id} has been cancelled.",
+        "notification_type": Notification.NotificationType.PAYMENT,
+        "priority": Notification.Priority.HIGH,
+    },
 }
 
 

@@ -6,7 +6,6 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.notifications.models import Notification
 from apps.payments.models import Payment, PaymentEvent
 from apps.payments.serializers import (
     PaymentCancelSerializer,
@@ -152,11 +151,9 @@ class PaymentViewSet(
         )
 
         create_payment_notification(
-            user=payment.user,
             payment=payment,
-            title="Payment successful",
-            message=f"Your payment {payment.payment_number} for order {payment.order.order_number} was successful.",
-            priority=Notification.Priority.HIGH,
+            template_key="payment_successful",
+            order_id=payment.order.order_number,
         )
 
         response_serializer = PaymentDetailSerializer(payment)
@@ -209,11 +206,9 @@ class PaymentViewSet(
         )
 
         create_payment_notification(
-            user=payment.user,
             payment=payment,
-            title="Payment failed",
-            message=f"Your payment {payment.payment_number} for order {payment.order.order_number} failed.",
-            priority=Notification.Priority.HIGH,
+            template_key="payment_failed",
+            order_id=payment.order.order_number,
         )
 
         response_serializer = PaymentDetailSerializer(payment)
@@ -259,11 +254,9 @@ class PaymentViewSet(
         )
 
         create_payment_notification(
-            user=payment.user,
             payment=payment,
-            title="Payment cancelled",
-            message=f"Your payment {payment.payment_number} for order {payment.order.order_number} was cancelled.",
-            priority=Notification.Priority.NORMAL,
+            template_key="payment_cancelled",
+            order_id=payment.order.order_number,
         )
 
         response_serializer = PaymentDetailSerializer(payment)

@@ -1,33 +1,36 @@
-from apps.notifications.models import Notification
 from apps.notifications.services import create_notification
+from apps.notifications.templates import render_notification_template
 
 
 def create_payment_notification(
     *,
-    user,
     payment,
-    title,
-    message,
-    priority=Notification.Priority.NORMAL,
+    template_key,
+    metadata=None,
+    **context,
 ):
-    if not user:
-        return None
+    if metadata is None:
+        metadata = {}
+
+    template_data = render_notification_template(
+        template_key,
+        **context,
+    )
 
     return create_notification(
-        user=user,
-        title=title,
-        message=message,
-        notification_type=Notification.NotificationType.PAYMENT,
-        priority=priority,
+        user=payment.order.user,
+        title=template_data["title"],
+        message=template_data["message"],
+        notification_type=template_data["notification_type"],
+        priority=template_data["priority"],
         related_object_type="payment",
         related_object_id=str(payment.pk),
         action_url=f"/payments/{payment.pk}/",
         metadata={
-            "payment_number": payment.payment_number,
-            "payment_status": payment.status,
-            "order_id": payment.order_id,
+            "payment_id": payment.pk,
+            "order_id": payment.order.pk,
             "order_number": payment.order.order_number,
-            "amount": str(payment.amount),
-            "provider": payment.provider,
+            "template_key": template_key,
+            **metadata,
         },
     )
