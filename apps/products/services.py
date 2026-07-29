@@ -1,36 +1,36 @@
-from apps.notifications.models import Notification
 from apps.notifications.services import create_notification
+from apps.notifications.templates import render_notification_template
 
 
 def create_product_notification(
     *,
     user,
     product,
-    title,
-    message,
-    priority=Notification.Priority.NORMAL,
+    template_key,
     metadata=None,
+    **context,
 ):
-    if not user:
-        return None
-
     if metadata is None:
         metadata = {}
 
+    template_data = render_notification_template(
+        template_key,
+        **context,
+    )
+
     return create_notification(
         user=user,
-        title=title,
-        message=message,
-        notification_type=Notification.NotificationType.PRODUCT,
-        priority=priority,
+        title=template_data["title"],
+        message=template_data["message"],
+        notification_type=template_data["notification_type"],
+        priority=template_data["priority"],
         related_object_type="product",
         related_object_id=str(product.pk),
         action_url=f"/products/{product.pk}/",
         metadata={
             "product_id": product.pk,
             "product_name": product.name,
-            "product_sku": product.sku,
-            "product_status": product.status,
+            "template_key": template_key,
             **metadata,
         },
     )

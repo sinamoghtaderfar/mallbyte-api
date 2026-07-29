@@ -12,7 +12,6 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from apps.notifications.models import Notification
 from apps.products.services import create_product_notification
 from apps.rbac.permissions import IsProductAdmin, IsVendor
 
@@ -163,27 +162,29 @@ class ProductViewSet(viewsets.ModelViewSet):
         ):
             return queryset.filter(seller=user)
 
-        return queryset.filter(status="approved", is_active=True)
+        return queryset.filter(
+            status=Product.StatusChoices.APPROVED,
+            is_active=True,
+        )
 
     def perform_create(self, serializer):
         product = serializer.save(
             seller=self.request.user,
-            status="pending",
+            status=Product.StatusChoices.PENDING,
         )
 
         create_product_notification(
             user=product.seller,
             product=product,
-            title="Product submitted",
-            message=f"Your product {product.name} has been submitted for review.",
-            priority=Notification.Priority.NORMAL,
+            template_key="product_submitted",
+            product_name=product.name,
         )
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         product = self.get_object()
 
-        product.status = "approved"
+        product.status = Product.StatusChoices.APPROVED
         product.approved_by = request.user
         product.approved_at = timezone.now()
         product.save()
@@ -191,9 +192,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         create_product_notification(
             user=product.seller,
             product=product,
-            title="Product approved",
-            message=f"Your product {product.name} has been approved.",
-            priority=Notification.Priority.HIGH,
+            template_key="product_approved",
+            product_name=product.name,
         )
 
         return Response({"message": "Product approved successfully"})
@@ -203,15 +203,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = self.get_object()
         reason = request.data.get("reason", "No reason provided")
 
-        product.status = "rejected"
+        product.status = Product.StatusChoices.REJECTED
         product.save()
 
         create_product_notification(
             user=product.seller,
             product=product,
-            title="Product rejected",
-            message=f"Your product {product.name} has been rejected.",
-            priority=Notification.Priority.HIGH,
+            template_key="product_rejected",
+            product_name=product.name,
+            reason=reason,
             metadata={
                 "reason": reason,
             },
@@ -228,22 +228,22 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], permission_classes=[AllowAny])
     def featured(self, request):
-        """Get featured products public"""
         products = Product.objects.filter(
             is_featured=True,
-            status="approved",
+            status=Product.StatusChoices.APPROVED,
             is_active=True,
         )
+
         serializer = ProductListSerializer(
             products,
             many=True,
             context={"request": request},
         )
+
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def add_view(self, request, pk=None):
-        """Increase product view count public"""
         product = self.get_object()
         product.views_count += 1
         product.save()
@@ -279,16 +279,17 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def recently_viewed(self, request):
-        """Get recently viewed products for current user"""
         if not request.user.is_authenticated:
             return Response({"error": "Authentication required"}, status=401)
 
         recent = RecentlyViewed.objects.filter(user=request.user)[:20]
+
         serializer = RecentlyViewedSerializer(
             recent,
             many=True,
             context={"request": request},
         )
+
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"], permission_classes=[AllowAny])
@@ -297,7 +298,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         related = Product.objects.filter(
             category=product.category,
-            status="approved",
+            status=Product.StatusChoices.APPROVED,
             is_active=True,
         ).exclude(id=product.id)[:10]
 
@@ -306,6 +307,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             many=True,
             context={"request": request},
         )
+
         return Response(serializer.data)
 
     @action(detail=False, methods=["get"])
@@ -314,11 +316,13 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"error": "You are not a seller"}, status=403)
 
         products = Product.objects.filter(seller=request.user)
+
         serializer = ProductListSerializer(
             products,
             many=True,
             context={"request": request},
         )
+
         return Response(serializer.data)
 
 
