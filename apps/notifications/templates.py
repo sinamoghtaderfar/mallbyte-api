@@ -73,6 +73,12 @@ NOTIFICATION_TEMPLATES = {
         "notification_type": Notification.NotificationType.RETURN,
         "priority": Notification.Priority.NORMAL,
     },
+    "return_cancelled": {
+        "title": "Return request cancelled",
+        "message": "Your return request for order #{order_id} has been cancelled.",
+        "notification_type": Notification.NotificationType.RETURN,
+        "priority": Notification.Priority.HIGH,
+    },
     "return_approved": {
         "title": "Return request approved",
         "message": "Your return request for order #{order_id} has been approved.",
@@ -84,6 +90,18 @@ NOTIFICATION_TEMPLATES = {
         "message": "Your return request for order #{order_id} has been rejected.",
         "notification_type": Notification.NotificationType.RETURN,
         "priority": Notification.Priority.HIGH,
+    },
+    "return_received": {
+        "title": "Return item received",
+        "message": "Your returned item for order #{order_id} has been received.",
+        "notification_type": Notification.NotificationType.RETURN,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "return_refunded": {
+        "title": "Return refunded",
+        "message": "Your refund for order #{order_id} has been processed.",
+        "notification_type": Notification.NotificationType.RETURN,
+        "priority": Notification.Priority.NORMAL,
     },
     "order_status_updated": {
         "title": "Order status updated",

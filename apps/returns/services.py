@@ -5,8 +5,8 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from apps.notifications.models import Notification
 from apps.notifications.services import create_notification
+from apps.notifications.templates import render_notification_template
 from apps.orders.models import Order, OrderItem
 from apps.returns.models import (
     ReturnItem,
@@ -34,28 +34,39 @@ def create_return_status_history(
 
 def create_return_notification(
     *,
-    user,
     return_request,
-    title,
-    message,
-    priority=Notification.Priority.NORMAL,
+    template_key,
+    metadata=None,
+    **context,
 ):
-    if not user:
+    if metadata is None:
+        metadata = {}
+
+    if not return_request.customer:
         return None
 
+    template_data = render_notification_template(
+        template_key,
+        **context,
+    )
+
     return create_notification(
-        user=user,
-        title=title,
-        message=message,
-        notification_type=Notification.NotificationType.RETURN,
-        priority=priority,
+        user=return_request.customer,
+        title=template_data["title"],
+        message=template_data["message"],
+        notification_type=template_data["notification_type"],
+        priority=template_data["priority"],
         related_object_type="return_request",
         related_object_id=return_request.pk,
         action_url=f"/returns/{return_request.pk}/",
         metadata={
+            "return_request_id": return_request.pk,
             "request_number": return_request.request_number,
             "status": return_request.status,
             "order_id": return_request.order_id,
+            "order_number": return_request.order.order_number,
+            "template_key": template_key,
+            **metadata,
         },
     )
 
@@ -159,11 +170,9 @@ def create_return_request(
     )
 
     create_return_notification(
-        user=return_request.customer,
         return_request=return_request,
-        title="Return request submitted",
-        message=f"Your return request {return_request.request_number} has been submitted.",
-        priority=Notification.Priority.NORMAL,
+        template_key="return_submitted",
+        order_id=return_request.order.order_number,
     )
 
     return return_request
@@ -198,11 +207,9 @@ def cancel_return_request(*, return_request, user, note=""):
     )
 
     create_return_notification(
-        user=return_request.customer,
         return_request=return_request,
-        title="Return request cancelled",
-        message=f"Your return request {return_request.request_number} has been cancelled.",
-        priority=Notification.Priority.NORMAL,
+        template_key="return_cancelled",
+        order_id=return_request.order.order_number,
     )
 
     return return_request
@@ -254,13 +261,10 @@ def approve_return_request(*, return_request, user, note="", approved_amount=Non
     )
 
     create_return_notification(
-        user=return_request.customer,
         return_request=return_request,
-        title="Return request approved",
-        message=f"Your return request {return_request.request_number} has been approved.",
-        priority=Notification.Priority.HIGH,
+        template_key="return_approved",
+        order_id=return_request.order.order_number,
     )
-
     return return_request
 
 
@@ -309,11 +313,12 @@ def reject_return_request(*, return_request, user, note=""):
     )
 
     create_return_notification(
-        user=return_request.customer,
         return_request=return_request,
-        title="Return request rejected",
-        message=f"Your return request {return_request.request_number} has been rejected.",
-        priority=Notification.Priority.HIGH,
+        template_key="return_rejected",
+        order_id=return_request.order.order_number,
+        metadata={
+            "note": note or "Return request rejected.",
+        },
     )
 
     return return_request
@@ -356,11 +361,9 @@ def mark_return_item_received(*, return_request, user, note=""):
     )
 
     create_return_notification(
-        user=return_request.customer,
         return_request=return_request,
-        title="Returned item received",
-        message=f"We have received the item for return request {return_request.request_number}.",
-        priority=Notification.Priority.NORMAL,
+        template_key="return_received",
+        order_id=return_request.order.order_number,
     )
 
     return return_request
@@ -399,11 +402,9 @@ def mark_return_refunded(*, return_request, user, note=""):
     )
 
     create_return_notification(
-        user=return_request.customer,
         return_request=return_request,
-        title="Return refunded",
-        message=f"Your return request {return_request.request_number} has been refunded.",
-        priority=Notification.Priority.HIGH,
+        template_key="return_refunded",
+        order_id=return_request.order.order_number,
     )
 
     return return_request
