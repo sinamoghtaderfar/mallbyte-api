@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Count
+from django.utils import timezone
 
 from apps.notifications.models import Notification, NotificationPreference
 
@@ -189,5 +192,25 @@ def mark_selected_notifications_as_unread(*, user, notification_ids):
 
     for notification in notifications:
         notification.mark_as_unread()
+
+    return count
+
+
+def delete_old_read_notifications(*, days=30, user=None):
+    if days <= 0:
+        raise ValueError("days must be greater than zero.")
+
+    cutoff_date = timezone.now() - timedelta(days=days)
+
+    notifications = Notification.objects.filter(
+        is_read=True,
+        created_at__lt=cutoff_date,
+    )
+
+    if user is not None:
+        notifications = notifications.filter(user=user)
+
+    count = notifications.count()
+    notifications.delete()
 
     return count
