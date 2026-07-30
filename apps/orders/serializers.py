@@ -4,7 +4,6 @@ from rest_framework import serializers
 
 from apps.discounts.services import apply_discount_to_order, validate_discount_for_cart
 from apps.inventory.models import Stock
-from apps.notifications.models import Notification
 from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatusHistory
 from apps.orders.services import create_order_notification
 from apps.products.models import Product
@@ -487,11 +486,9 @@ class CheckoutSerializer(serializers.Serializer):
                 note="Order created from cart.",
             )
             create_order_notification(
-                user=user,
                 order=order,
-                title="Order created",
-                message=f"Your order {order.order_number} has been created.",
-                priority=Notification.Priority.NORMAL,
+                template_key="order_created",
+                order_id=order.order_number,
             )
             cart.clear()
 
