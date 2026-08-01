@@ -37,6 +37,7 @@ urlpatterns = [
     path("api/discounts/", include("apps.discounts.urls")),
     path("api/returns/", include("apps.returns.urls")),
     path("api/notifications/", include("apps.notifications.urls")),
+    path("api/reviews/", include("apps.reviews.urls")),
 ]
 
 
