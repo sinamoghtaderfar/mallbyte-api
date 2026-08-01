@@ -11,6 +11,7 @@ from apps.reviews.serializers import (
     ProductReviewModerationSerializer,
     ProductReviewSerializer,
 )
+from apps.reviews.services import update_product_review_stats
 
 
 class ProductReviewViewSet(viewsets.ModelViewSet):
@@ -87,6 +88,8 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
             ]
         )
 
+        update_product_review_stats(review.product)
+
         serializer = self.get_serializer(review)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -116,6 +119,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
                 "updated_at",
             ]
         )
+        update_product_review_stats(review.product)
 
         response_serializer = self.get_serializer(review)
 
@@ -133,6 +137,13 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         review.status = ProductReview.StatusChoices.HIDDEN
         review.save(update_fields=["status", "updated_at"])
 
+        update_product_review_stats(review.product)
+
         serializer = self.get_serializer(review)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def perform_destroy(self, instance):
+        product = instance.product
+        instance.delete()
+        update_product_review_stats(product)
