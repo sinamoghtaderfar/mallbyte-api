@@ -396,24 +396,6 @@ class ProductTag(models.Model):
     def __str__(self):
         return f"{self.product.name} - {self.tag.name}"
 
-# DEPRECATED:
-# Use apps.reviews.models.ProductReview instead.
-# This legacy model is kept temporarily for backward compatibility only.
-class Review(models.Model):
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
-    rating = models.PositiveSmallIntegerField()
-    title = models.CharField(max_length=200, blank=True)
-    comment = models.TextField()
-    is_approved = models.BooleanField(default=False)
-    helpful_count = models.PositiveIntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = ['product', 'user']
-        ordering = ['-created_at']
-        
 class Wishlist(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wishlist')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='wishlisted_by')
