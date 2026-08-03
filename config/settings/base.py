@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     "apps.returns",
     "apps.notifications",
     "apps.reviews",
+    "apps.support",
 ]
 
 MIDDLEWARE = [
