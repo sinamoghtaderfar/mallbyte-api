@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from apps.orders.models import Order, OrderItem
 from apps.reviews.models import ProductReview
+from apps.reviews.notifications import create_review_notification
 
 
 class ProductReviewSerializer(serializers.ModelSerializer):
@@ -98,11 +99,19 @@ class ProductReviewSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request = self.context["request"]
 
-        return ProductReview.objects.create(
+        review = ProductReview.objects.create(
             customer=request.user,
             status=ProductReview.StatusChoices.PENDING,
             **validated_data,
         )
+
+        create_review_notification(
+            review=review,
+            template_key="review_submitted",
+            product_name=review.product.name,
+        )
+
+        return review
 
 
 class ProductReviewModerationSerializer(serializers.Serializer):

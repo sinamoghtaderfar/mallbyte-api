@@ -127,6 +127,30 @@ NOTIFICATION_TEMPLATES = {
         "notification_type": Notification.NotificationType.SHIPPING,
         "priority": Notification.Priority.HIGH,
     },
+        "review_submitted": {
+        "title": "Review submitted",
+        "message": "Your review for '{product_name}' has been submitted and is pending approval.",
+        "notification_type": Notification.NotificationType.PRODUCT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "review_approved": {
+        "title": "Review approved",
+        "message": "Your review for '{product_name}' has been approved.",
+        "notification_type": Notification.NotificationType.PRODUCT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "review_rejected": {
+        "title": "Review rejected",
+        "message": "Your review for '{product_name}' has been rejected. Reason: {reason}",
+        "notification_type": Notification.NotificationType.PRODUCT,
+        "priority": Notification.Priority.HIGH,
+    },
+    "review_hidden": {
+        "title": "Review hidden",
+        "message": "Your review for '{product_name}' has been hidden by moderation.",
+        "notification_type": Notification.NotificationType.PRODUCT,
+        "priority": Notification.Priority.HIGH,
+    },
 }
 
 

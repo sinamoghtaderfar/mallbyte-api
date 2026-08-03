@@ -17,6 +17,7 @@ from apps.reviews.serializers import (
 )
 from apps.reviews.services import set_review_vote, update_product_review_stats
 from apps.reviews.services import update_product_review_stats
+from apps.reviews.notifications import create_review_notification
 from apps.reviews.models import ProductReview, ProductReviewVote
 
 class ProductReviewViewSet(viewsets.ModelViewSet):
@@ -94,6 +95,12 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         )
 
         update_product_review_stats(review.product)
+        
+        create_review_notification(
+            review=review,
+            template_key="review_approved",
+            product_name=review.product.name,
+        )
 
         serializer = self.get_serializer(review)
 
@@ -125,6 +132,13 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
             ]
         )
         update_product_review_stats(review.product)
+        
+        create_review_notification(
+            review=review,
+            template_key="review_rejected",
+            product_name=review.product.name,
+            reason=review.rejected_reason or "No reason provided.",
+        )
 
         response_serializer = self.get_serializer(review)
 
@@ -149,6 +163,12 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         review.save(update_fields=["status", "updated_at"])
 
         update_product_review_stats(review.product)
+        
+        create_review_notification(
+            review=review,
+            template_key="review_hidden",
+            product_name=review.product.name,
+        )
 
         serializer = self.get_serializer(review)
 
