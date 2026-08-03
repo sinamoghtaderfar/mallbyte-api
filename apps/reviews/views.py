@@ -2,7 +2,11 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import (
+    IsAdminUser,
+    IsAuthenticated,
+    IsAuthenticatedOrReadOnly,
+)
 from rest_framework.response import Response
 
 from apps.reviews.models import ProductReview
@@ -11,8 +15,9 @@ from apps.reviews.serializers import (
     ProductReviewModerationSerializer,
     ProductReviewSerializer,
 )
+from apps.reviews.services import set_review_vote, update_product_review_stats
 from apps.reviews.services import update_product_review_stats
-
+from apps.reviews.models import ProductReview, ProductReviewVote
 
 class ProductReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ProductReviewSerializer
@@ -131,6 +136,12 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         url_path="hide",
         permission_classes=[IsAdminUser],
     )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="hide",
+        permission_classes=[IsAdminUser],
+    )
     def hide(self, request, pk=None):
         review = self.get_object()
 
@@ -143,6 +154,62 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="helpful",
+        permission_classes=[IsAuthenticated],
+    )
+    def helpful(self, request, pk=None):
+        review = self.get_object()
+
+        try:
+            _, updated_review = set_review_vote(
+                review=review,
+                user=request.user,
+                vote=ProductReviewVote.VoteChoices.HELPFUL,
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(updated_review)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="not-helpful",
+        permission_classes=[IsAuthenticated],
+    )
+    def not_helpful(self, request, pk=None):
+        review = self.get_object()
+
+        try:
+            _, updated_review = set_review_vote(
+                review=review,
+                user=request.user,
+                vote=ProductReviewVote.VoteChoices.NOT_HELPFUL,
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(updated_review)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def perform_destroy(self, instance):
+        product = instance.product
+        instance.delete()
+        update_product_review_stats(product)
+        
+        
     def perform_destroy(self, instance):
         product = instance.product
         instance.delete()

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.reviews.models import ProductReview
+from apps.reviews.models import ProductReview, ProductReviewVote
 
 
 @admin.register(ProductReview)
@@ -37,4 +37,33 @@ class ProductReviewAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
         "approved_at",
+    )
+
+
+@admin.register(ProductReviewVote)
+class ProductReviewVoteAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "review",
+        "user",
+        "vote",
+        "created_at",
+    )
+
+    list_filter = (
+        "vote",
+        "created_at",
+    )
+
+    search_fields = (
+        "review__title",
+        "review__comment",
+        "user__phone",
+        "user__email",
+        "user__full_name",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
     )

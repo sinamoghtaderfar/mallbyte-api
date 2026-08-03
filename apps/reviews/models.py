@@ -93,3 +93,42 @@ class ProductReview(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.rating}/5 by {self.customer}"
+
+
+class ProductReviewVote(models.Model):
+    class VoteChoices(models.TextChoices):
+        HELPFUL = "helpful", "Helpful"
+        NOT_HELPFUL = "not_helpful", "Not Helpful"
+
+    review = models.ForeignKey(
+        ProductReview,
+        on_delete=models.CASCADE,
+        related_name="votes",
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="product_review_votes",
+    )
+
+    vote = models.CharField(
+        max_length=20,
+        choices=VoteChoices.choices,
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Product Review Vote"
+        verbose_name_plural = "Product Review Votes"
+        unique_together = ["review", "user"]
+        indexes = [
+            models.Index(fields=["review", "vote"]),
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user} voted {self.vote} on review {self.review_id}"
