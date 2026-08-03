@@ -3,7 +3,7 @@ from rest_framework import serializers
 from apps.rbac import models
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
-    Attribute, AttributeValue, ProductAttribute, RecentlyViewed, Review, Tag, Wishlist, 
+    Attribute, AttributeValue, ProductAttribute, RecentlyViewed, Tag, Wishlist, 
 )
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -157,15 +157,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_average_rating(self, obj):
-        
-        #from apps.reviews.models import Review
-        #result = Review.objects.filter(product=obj).aggregate(avg=models.Avg('rating'))
-       
         return 0
     
     def get_reviews_count(self, obj):
-        #return obj.reviews.count()
-        return 0
+        return obj.reviews.count()
     
     def get_brand_logo(self, obj):
         if obj.brand and obj.brand.logo:
@@ -249,17 +244,6 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         
         return instance
     
-
-class ReviewSerializer(serializers.ModelSerializer):
-    user_name = serializers.ReadOnlyField(source='user.full_name')
-    user_phone = serializers.ReadOnlyField(source='user.phone')
-    
-    class Meta:
-        model = Review
-        fields = ['id', 'product', 'user', 'user_name', 'user_phone',
-                  'rating', 'title', 'comment', 'is_approved', 
-                  'helpful_count', 'created_at']
-        read_only_fields = ['id', 'user', 'is_approved', 'helpful_count', 'created_at']
 
 class WishlistSerializer(serializers.ModelSerializer):
     product_name = serializers.ReadOnlyField(source='product.name')

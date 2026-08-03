@@ -25,7 +25,6 @@ from .models import (
     ProductImage,
     ProductVariant,
     RecentlyViewed,
-    Review,
     Tag,
     Wishlist,
 )
@@ -40,7 +39,6 @@ from .serializers import (
     ProductListSerializer,
     ProductVariantSerializer,
     RecentlyViewedSerializer,
-    ReviewSerializer,
     TagSerializer,
     WishlistSerializer,
 )
@@ -356,43 +354,6 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
         product_id = self.request.data.get("product")
         product = get_object_or_404(Product, id=product_id, seller=self.request.user)
         serializer.save(product=product)
-
-
-# ==================== Review Views ====================
-
-
-class ReviewViewSet(viewsets.ModelViewSet):
-    serializer_class = ReviewSerializer
-
-    def get_queryset(self):
-
-        queryset = Review.objects.filter(is_approved=True)
-        product_id = self.request.query_params.get("product")
-        if product_id:
-            queryset = queryset.filter(product_id=product_id)
-        return queryset
-
-    def get_object(self):
-
-        queryset = Review.objects.all()
-        obj = get_object_or_404(queryset, pk=self.kwargs["pk"])
-        self.check_object_permissions(self.request, obj)
-        return obj
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-    @action(detail=True, methods=["post"])
-    def helpful(self, request, pk=None):
-        review = self.get_object()
-        review.helpful_count += 1
-        review.save()
-        return Response({"helpful_count": review.helpful_count})
-
-    def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
-            return [AllowAny()]
-        return [IsAuthenticated()]
 
 
 # ==================== Wishlist Views ====================

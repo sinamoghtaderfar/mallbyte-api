@@ -395,7 +395,10 @@ class ProductTag(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.tag.name}"
-    
+
+# DEPRECATED:
+# Use apps.reviews.models.ProductReview instead.
+# This legacy model is kept temporarily for backward compatibility only.
 class Review(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reviews')
