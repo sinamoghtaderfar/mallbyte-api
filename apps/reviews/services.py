@@ -90,3 +90,33 @@ def set_review_vote(*, review: ProductReview, user, vote):
         update_review_vote_counts(locked_review)
 
     return review_vote, locked_review
+
+def get_product_review_summary(product: Product):
+    approved_reviews = ProductReview.objects.filter(
+        product=product,
+        status=ProductReview.StatusChoices.APPROVED,
+    )
+
+    rating_counts = approved_reviews.aggregate(
+        five_star=Count("id", filter=Q(rating=5)),
+        four_star=Count("id", filter=Q(rating=4)),
+        three_star=Count("id", filter=Q(rating=3)),
+        two_star=Count("id", filter=Q(rating=2)),
+        one_star=Count("id", filter=Q(rating=1)),
+    )
+
+    total_count = approved_reviews.count()
+
+    return {
+        "product_id": product.pk,
+        "average_rating": str(product.avrage_rating),
+        "reviews_count": product.reviews_count,
+        "rating_breakdown": {
+            "5": rating_counts["five_star"] or 0,
+            "4": rating_counts["four_star"] or 0,
+            "3": rating_counts["three_star"] or 0,
+            "2": rating_counts["two_star"] or 0,
+            "1": rating_counts["one_star"] or 0,
+        },
+        "total_approved_reviews": total_count,
+    }

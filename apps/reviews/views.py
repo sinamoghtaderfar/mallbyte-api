@@ -15,10 +15,14 @@ from apps.reviews.serializers import (
     ProductReviewModerationSerializer,
     ProductReviewSerializer,
 )
-from apps.reviews.services import set_review_vote, update_product_review_stats
-from apps.reviews.services import update_product_review_stats
+from apps.reviews.services import (
+    get_product_review_summary,
+    set_review_vote,
+    update_product_review_stats,
+)
 from apps.reviews.notifications import create_review_notification
 from apps.reviews.models import ProductReview, ProductReviewVote
+from apps.products.models import Product
 
 class ProductReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ProductReviewSerializer
@@ -70,6 +74,32 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(is_verified_purchase=False)
 
         return queryset.order_by("-created_at")
+    
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="summary",
+    )
+    def summary(self, request):
+        product_id = request.query_params.get("product")
+
+        if not product_id:
+            return Response(
+                {"detail": "product query parameter is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            product = Product.objects.get(pk=product_id)
+        except Product.DoesNotExist:
+            return Response(
+                {"detail": "Product not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        summary_data = get_product_review_summary(product)
+
+        return Response(summary_data, status=status.HTTP_200_OK)
 
     @action(
         detail=True,
