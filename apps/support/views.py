@@ -2,21 +2,41 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.support.models import SupportTicket, TicketMessage
+from apps.support.models import (
+    SupportTag,
+    SupportTicket,
+    TicketAttachment,
+    TicketAuditLog,
+    TicketMessage,
+)
 from apps.support.notifications import create_support_notification
 from apps.support.permissions import (
     IsSupportStaff,
     IsTicketParticipantOrSupportStaff,
 )
 from apps.support.serializers import (
+    SupportTagSerializer,
     SupportTicketSerializer,
     TicketAssignSerializer,
+    TicketAttachmentSerializer,
+    TicketAuditLogSerializer,
     TicketReplySerializer,
+    TicketTagSerializer,
 )
 
+class SupportTagViewSet(viewsets.ModelViewSet):
+    serializer_class = SupportTagSerializer
+    queryset = SupportTag.objects.all().order_by("name")
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+
+        return [IsAuthenticated(), IsSupportStaff()]
 
 class SupportTicketViewSet(viewsets.ModelViewSet):
     serializer_class = SupportTicketSerializer
@@ -195,6 +215,136 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+        
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        url_path="attachments",
+        permission_classes=[IsAuthenticated, IsTicketParticipantOrSupportStaff],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def attachments(self, request, pk=None):
+        ticket = self.get_object()
+
+        if request.method == "GET":
+            serializer = TicketAttachmentSerializer(
+                ticket.attachments.all(),
+                many=True,
+                context={"request": request},
+            )
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = TicketAttachmentSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        uploaded_file = serializer.validated_data["file"]
+
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket,
+            uploaded_by=request.user,
+            file=uploaded_file,
+            original_filename=getattr(uploaded_file, "name", ""),
+            content_type=getattr(uploaded_file, "content_type", ""),
+            size=getattr(uploaded_file, "size", 0) or 0,
+        )
+
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.ATTACHMENT_ADDED,
+            description="Attachment uploaded.",
+            metadata={
+                "attachment_id": attachment.pk,
+                "filename": attachment.original_filename,
+                "size": attachment.size,
+            },
+        )
+
+        response_serializer = TicketAttachmentSerializer(
+            attachment,
+            context={"request": request},
+        )
+
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="add-tag",
+        permission_classes=[IsAuthenticated, IsSupportStaff],
+    )
+    def add_tag(self, request, pk=None):
+        ticket = self.get_object()
+
+        serializer = TicketTagSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        tag = serializer.validated_data["tag"]
+        ticket.tags.add(tag)
+
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.TAG_ADDED,
+            description=f"Tag '{tag.name}' added.",
+            metadata={
+                "tag_id": tag.pk,
+                "tag_name": tag.name,
+            },
+        )
+
+        response_serializer = self.get_serializer(ticket)
+
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="remove-tag",
+        permission_classes=[IsAuthenticated, IsSupportStaff],
+    )
+    def remove_tag(self, request, pk=None):
+        ticket = self.get_object()
+
+        serializer = TicketTagSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        tag = serializer.validated_data["tag"]
+        ticket.tags.remove(tag)
+
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.TAG_REMOVED,
+            description=f"Tag '{tag.name}' removed.",
+            metadata={
+                "tag_id": tag.pk,
+                "tag_name": tag.name,
+            },
+        )
+
+        response_serializer = self.get_serializer(ticket)
+
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="audit-logs",
+        permission_classes=[IsAuthenticated, IsSupportStaff],
+    )
+    def audit_logs(self, request, pk=None):
+        ticket = self.get_object()
+
+        serializer = TicketAuditLogSerializer(
+            ticket.audit_logs.all(),
+            many=True,
+        )
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
     @action(
         detail=True,
         methods=["post"],
@@ -218,11 +368,29 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
         is_internal_note = serializer.validated_data.get("is_internal_note", False)
 
-        TicketMessage.objects.create(
+        message = TicketMessage.objects.create(
             ticket=ticket,
             sender=request.user,
             message=serializer.validated_data["message"],
             is_internal_note=is_internal_note,
+        )
+
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=(
+                TicketAuditLog.ActionChoices.INTERNAL_NOTE_CREATED
+                if is_internal_note
+                else TicketAuditLog.ActionChoices.REPLIED
+            ),
+            description=(
+                "Internal note created."
+                if is_internal_note
+                else "Ticket reply added."
+            ),
+            metadata={
+                "message_id": message.pk,
+            },
         )
 
         update_fields = ["updated_at"]
@@ -275,6 +443,16 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         ticket.assigned_to = serializer.validated_data["assigned_to"]
         ticket.save(update_fields=["assigned_to", "updated_at"])
         
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.ASSIGNED,
+            description=f"Ticket assigned to {ticket.assigned_to}.",
+            metadata={
+                "assigned_to_id": ticket.assigned_to_id,
+            },
+        )
+        
         create_support_notification(
             user=ticket.assigned_to,
             ticket=ticket,
@@ -296,6 +474,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         ticket = self.get_object()
         ticket.mark_resolved()
         
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.RESOLVED,
+            description="Ticket resolved.",
+        )
+        
         create_support_notification(
             user=ticket.customer,
             ticket=ticket,
@@ -316,7 +501,12 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def close(self, request, pk=None):
         ticket = self.get_object()
         ticket.close()
-        
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.CLOSED,
+            description="Ticket closed.",
+        )
         create_support_notification(
             user=ticket.customer,
             ticket=ticket,
@@ -337,6 +527,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def reopen(self, request, pk=None):
         ticket = self.get_object()
         ticket.reopen()
+        
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.REOPENED,
+            description="Ticket reopened.",
+        )
         
         create_support_notification(
             user=ticket.customer,

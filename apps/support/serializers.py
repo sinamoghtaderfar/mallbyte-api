@@ -4,11 +4,94 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.support.notifications import create_support_notification
-from apps.support.models import SupportTicket, TicketMessage
+from apps.support.models import (
+    SupportTag,
+    SupportTicket,
+    TicketAttachment,
+    TicketAuditLog,
+    TicketMessage,
+)
 
 User = get_user_model()
 
+class SupportTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupportTag
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "color",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        ]
 
+
+class TicketAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_display = serializers.CharField(
+        source="uploaded_by.full_name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = TicketAttachment
+        fields = [
+            "id",
+            "ticket",
+            "message",
+            "uploaded_by",
+            "uploaded_by_display",
+            "file",
+            "original_filename",
+            "content_type",
+            "size",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "ticket",
+            "message",
+            "uploaded_by",
+            "uploaded_by_display",
+            "original_filename",
+            "content_type",
+            "size",
+            "created_at",
+        ]
+
+
+class TicketAuditLogSerializer(serializers.ModelSerializer):
+    actor_display = serializers.CharField(
+        source="actor.full_name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = TicketAuditLog
+        fields = [
+            "id",
+            "ticket",
+            "actor",
+            "actor_display",
+            "action",
+            "description",
+            "metadata",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class TicketTagSerializer(serializers.Serializer):
+    tag = serializers.PrimaryKeyRelatedField(
+        queryset=SupportTag.objects.filter(is_active=True)
+    )
 class TicketMessageSerializer(serializers.ModelSerializer):
     sender_display = serializers.CharField(source="sender.full_name", read_only=True)
 
@@ -39,6 +122,12 @@ class SupportTicketSerializer(serializers.ModelSerializer):
     assigned_to_display = serializers.CharField(source="assigned_to.full_name", read_only=True)
     messages = serializers.SerializerMethodField()
     initial_message = serializers.CharField(write_only=True, required=True)
+    tags_detail = SupportTagSerializer(
+        source="tags",
+        many=True,
+        read_only=True,
+    )
+    attachments = TicketAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = SupportTicket
@@ -63,6 +152,9 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             "initial_message",
             "created_at",
             "updated_at",
+            "tags",
+            "tags_detail",
+            "attachments",
         ]
         read_only_fields = [
             "id",
@@ -78,6 +170,8 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             "messages",
             "created_at",
             "updated_at",
+            "tags_detail",
+            "attachments",
         ]
 
     def get_messages(self, obj):
@@ -131,6 +225,13 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             ticket=ticket,
             sender=request.user,
             message=initial_message,
+        )
+        
+        TicketAuditLog.log(
+            ticket=ticket,
+            actor=request.user,
+            action=TicketAuditLog.ActionChoices.CREATED,
+            description="Support ticket created.",
         )
         
         create_support_notification(
