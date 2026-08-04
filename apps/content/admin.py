@@ -6,8 +6,9 @@ from apps.content.models import (
     ContentPage,
     FAQCategory,
     FAQItem,
+    NavigationItem,
+    NavigationMenu,
 )
-
 
 @admin.register(ContentPage)
 class ContentPageAdmin(admin.ModelAdmin):
@@ -353,4 +354,93 @@ class AnnouncementAdmin(admin.ModelAdmin):
                 )
             },
         ),
+    )
+    
+class NavigationItemInline(admin.TabularInline):
+    model = NavigationItem
+    extra = 0
+    fields = (
+        "label",
+        "parent",
+        "page",
+        "link_url",
+        "icon",
+        "is_active",
+        "requires_auth",
+        "open_in_new_tab",
+        "order",
+    )
+
+
+@admin.register(NavigationMenu)
+class NavigationMenuAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "slug",
+        "placement",
+        "is_active",
+        "order",
+        "created_at",
+    )
+
+    list_filter = (
+        "placement",
+        "is_active",
+        "created_at",
+    )
+
+    search_fields = (
+        "name",
+        "slug",
+        "items__label",
+    )
+
+    prepopulated_fields = {
+        "slug": ("name",),
+    }
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+    inlines = [NavigationItemInline]
+
+
+@admin.register(NavigationItem)
+class NavigationItemAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "label",
+        "menu",
+        "parent",
+        "page",
+        "resolved_url",
+        "is_active",
+        "requires_auth",
+        "open_in_new_tab",
+        "order",
+        "created_at",
+    )
+
+    list_filter = (
+        "menu",
+        "is_active",
+        "requires_auth",
+        "open_in_new_tab",
+        "created_at",
+    )
+
+    search_fields = (
+        "label",
+        "link_url",
+        "page__title",
+        "page__slug",
+        "menu__name",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
     )

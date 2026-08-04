@@ -322,3 +322,106 @@ class Announcement(TimeStampedModel, PublishableModel):
 
     def __str__(self):
         return self.title
+    
+class NavigationMenu(TimeStampedModel):
+    class PlacementChoices(models.TextChoices):
+        HEADER = "header", "Header"
+        FOOTER = "footer", "Footer"
+        MOBILE = "mobile", "Mobile"
+        HELP = "help", "Help"
+        ACCOUNT = "account", "Account"
+
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=140, unique=True, db_index=True)
+
+    placement = models.CharField(
+        max_length=30,
+        choices=PlacementChoices.choices,
+        default=PlacementChoices.HEADER,
+        db_index=True,
+    )
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Navigation Menu"
+        verbose_name_plural = "Navigation Menus"
+        ordering = ["placement", "order", "name"]
+        indexes = [
+            models.Index(fields=["slug"]),
+            models.Index(fields=["placement", "is_active"]),
+            models.Index(fields=["order"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.placement}"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = generate_unique_slug(self, self.name)
+
+        super().save(*args, **kwargs)
+
+
+class NavigationItem(TimeStampedModel):
+    menu = models.ForeignKey(
+        NavigationMenu,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
+
+    page = models.ForeignKey(
+        ContentPage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="navigation_items",
+    )
+
+    label = models.CharField(max_length=120)
+    link_url = models.CharField(max_length=500, blank=True)
+
+    icon = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Optional icon name for frontend.",
+    )
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    requires_auth = models.BooleanField(default=False)
+    open_in_new_tab = models.BooleanField(default=False)
+
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Navigation Item"
+        verbose_name_plural = "Navigation Items"
+        ordering = ["menu__order", "parent__id", "order", "label"]
+        indexes = [
+            models.Index(fields=["menu", "is_active"]),
+            models.Index(fields=["parent", "order"]),
+            models.Index(fields=["page"]),
+            models.Index(fields=["order"]),
+        ]
+
+    def __str__(self):
+        return f"{self.label} - {self.menu.name}"
+
+    @property
+    def resolved_url(self):
+        if self.link_url:
+            return self.link_url
+
+        if self.page:
+            return f"/pages/{self.page.slug}/"
+
+        return ""
