@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.content.models import (
     Announcement,
@@ -317,3 +318,65 @@ class AnnouncementViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(announcement)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+class HomepageContentView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        banners = visible_now_queryset(
+            Banner.objects.filter(
+                placement__in=[
+                    Banner.PlacementChoices.HOME_HERO,
+                    Banner.PlacementChoices.HOME_TOP,
+                    Banner.PlacementChoices.HOME_MIDDLE,
+                    Banner.PlacementChoices.GLOBAL,
+                ]
+            )
+        ).order_by("placement", "order", "-created_at")
+
+        announcements = visible_now_queryset(
+            Announcement.objects.filter(
+                placement__in=[
+                    Announcement.PlacementChoices.GLOBAL,
+                    Announcement.PlacementChoices.HOME,
+                ]
+            )
+        ).order_by("order", "-created_at")
+
+        featured_pages = visible_now_queryset(
+            ContentPage.objects.filter(
+                is_featured=True,
+            )
+        ).order_by("order", "title")
+
+        featured_faqs = FAQItem.objects.select_related("category").filter(
+            is_active=True,
+            is_featured=True,
+            category__is_active=True,
+        ).order_by("category__order", "order", "question")
+
+        return Response(
+            {
+                "banners": BannerSerializer(
+                    banners,
+                    many=True,
+                    context={"request": request},
+                ).data,
+                "announcements": AnnouncementSerializer(
+                    announcements,
+                    many=True,
+                    context={"request": request},
+                ).data,
+                "featured_pages": ContentPageSerializer(
+                    featured_pages,
+                    many=True,
+                    context={"request": request},
+                ).data,
+                "featured_faqs": FAQItemSerializer(
+                    featured_faqs,
+                    many=True,
+                    context={"request": request},
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )

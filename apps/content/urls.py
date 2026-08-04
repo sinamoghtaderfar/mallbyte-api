@@ -7,6 +7,7 @@ from apps.content.views import (
     ContentPageViewSet,
     FAQCategoryViewSet,
     FAQItemViewSet,
+    HomepageContentView,
 )
 
 router = DefaultRouter()
@@ -17,5 +18,6 @@ router.register("faqs", FAQItemViewSet, basename="faq-item")
 router.register("announcements", AnnouncementViewSet, basename="announcement")
 
 urlpatterns = [
+    path("homepage/", HomepageContentView.as_view(), name="content-homepage"),
     path("", include(router.urls)),
 ]
