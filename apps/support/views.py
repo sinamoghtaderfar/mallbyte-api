@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -97,7 +97,104 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsSupportStaff()]
 
         return super().get_permissions()
+    
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="summary",
+        permission_classes=[IsAuthenticated],
+    )
+    def summary(self, request):
+        queryset = self.get_queryset()
 
+        status_summary = queryset.aggregate(
+            total=Count("id"),
+            open=Count(
+                "id",
+                filter=Q(status=SupportTicket.StatusChoices.OPEN),
+            ),
+            pending=Count(
+                "id",
+                filter=Q(status=SupportTicket.StatusChoices.PENDING),
+            ),
+            resolved=Count(
+                "id",
+                filter=Q(status=SupportTicket.StatusChoices.RESOLVED),
+            ),
+            closed=Count(
+                "id",
+                filter=Q(status=SupportTicket.StatusChoices.CLOSED),
+            ),
+        )
+
+        priority_summary = queryset.aggregate(
+            low=Count(
+                "id",
+                filter=Q(priority=SupportTicket.PriorityChoices.LOW),
+            ),
+            normal=Count(
+                "id",
+                filter=Q(priority=SupportTicket.PriorityChoices.NORMAL),
+            ),
+            high=Count(
+                "id",
+                filter=Q(priority=SupportTicket.PriorityChoices.HIGH),
+            ),
+            urgent=Count(
+                "id",
+                filter=Q(priority=SupportTicket.PriorityChoices.URGENT),
+            ),
+        )
+
+        category_summary = queryset.aggregate(
+            order=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.ORDER),
+            ),
+            payment=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.PAYMENT),
+            ),
+            shipping=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.SHIPPING),
+            ),
+            return_ticket=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.RETURN),
+            ),
+            product=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.PRODUCT),
+            ),
+            account=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.ACCOUNT),
+            ),
+            other=Count(
+                "id",
+                filter=Q(category=SupportTicket.CategoryChoices.OTHER),
+            ),
+        )
+
+        assigned_to_me_count = queryset.filter(
+            assigned_to=request.user,
+        ).count()
+
+        unassigned_count = queryset.filter(
+            assigned_to__isnull=True,
+        ).count()
+
+        return Response(
+            {
+                "status": status_summary,
+                "priority": priority_summary,
+                "category": category_summary,
+                "assigned_to_me": assigned_to_me_count,
+                "unassigned": unassigned_count,
+            },
+            status=status.HTTP_200_OK,
+        )
     @action(
         detail=True,
         methods=["post"],
