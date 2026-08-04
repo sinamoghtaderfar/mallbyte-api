@@ -6,8 +6,9 @@ from apps.content.models import (
     ContentPage,
     FAQCategory,
     FAQItem,
+    NavigationItem,
+    NavigationMenu,
 )
-
 
 class ContentPageSerializer(serializers.ModelSerializer):
     created_by_display = serializers.CharField(
@@ -197,3 +198,109 @@ class AnnouncementSerializer(serializers.ModelSerializer):
 
     def get_is_visible(self, obj):
         return obj.is_visible_now()
+    
+class NavigationItemSerializer(serializers.ModelSerializer):
+    url = serializers.CharField(source="resolved_url", read_only=True)
+    page_slug = serializers.CharField(source="page.slug", read_only=True)
+    page_title = serializers.CharField(source="page.title", read_only=True)
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NavigationItem
+        fields = [
+            "id",
+            "label",
+            "url",
+            "link_url",
+            "page",
+            "page_slug",
+            "page_title",
+            "icon",
+            "is_active",
+            "requires_auth",
+            "open_in_new_tab",
+            "order",
+            "children",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "url",
+            "page_slug",
+            "page_title",
+            "children",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_children(self, obj):
+        request = self.context.get("request")
+
+        children = obj.children.select_related("page").all()
+
+        if not (
+            request
+            and request.user.is_authenticated
+            and (request.user.is_staff or request.user.is_superuser)
+        ):
+            children = children.filter(is_active=True)
+
+        if not (request and request.user.is_authenticated):
+            children = children.filter(requires_auth=False)
+
+        children = children.order_by("order", "label")
+
+        return NavigationItemSerializer(
+            children,
+            many=True,
+            context=self.context,
+        ).data
+
+
+class NavigationMenuSerializer(serializers.ModelSerializer):
+    items = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NavigationMenu
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "placement",
+            "is_active",
+            "order",
+            "items",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "slug",
+            "items",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_items(self, obj):
+        request = self.context.get("request")
+
+        items = obj.items.select_related("page").filter(parent__isnull=True)
+
+        if not (
+            request
+            and request.user.is_authenticated
+            and (request.user.is_staff or request.user.is_superuser)
+        ):
+            items = items.filter(is_active=True)
+
+        if not (request and request.user.is_authenticated):
+            items = items.filter(requires_auth=False)
+
+        items = items.order_by("order", "label")
+
+        return NavigationItemSerializer(
+            items,
+            many=True,
+            context=self.context,
+        ).data

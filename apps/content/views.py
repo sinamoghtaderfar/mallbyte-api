@@ -13,6 +13,7 @@ from apps.content.models import (
     ContentPage,
     FAQCategory,
     FAQItem,
+    NavigationMenu,
 )
 from apps.content.permissions import IsContentAdmin
 from apps.content.serializers import (
@@ -21,6 +22,7 @@ from apps.content.serializers import (
     ContentPageSerializer,
     FAQCategorySerializer,
     FAQItemSerializer,
+    NavigationMenuSerializer,
 )
 
 
@@ -380,3 +382,41 @@ class HomepageContentView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+        
+class NavigationMenuViewSet(viewsets.ModelViewSet):
+    serializer_class = NavigationMenuSerializer
+    lookup_field = "slug"
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+
+        return [IsAuthenticated(), IsContentAdmin()]
+
+    def get_queryset(self):
+        user = self.request.user
+
+        queryset = NavigationMenu.objects.prefetch_related(
+            "items",
+            "items__children",
+        ).all()
+
+        if not (
+            user.is_authenticated
+            and (user.is_staff or user.is_superuser)
+        ):
+            queryset = queryset.filter(is_active=True)
+
+        placement = self.request.query_params.get("placement")
+        is_active = self.request.query_params.get("is_active")
+
+        if placement:
+            queryset = queryset.filter(placement=placement)
+
+        if is_active is not None and user.is_authenticated and (user.is_staff or user.is_superuser):
+            if is_active.lower() == "true":
+                queryset = queryset.filter(is_active=True)
+            elif is_active.lower() == "false":
+                queryset = queryset.filter(is_active=False)
+
+        return queryset.order_by("placement", "order", "name")
