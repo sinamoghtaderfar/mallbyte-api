@@ -38,10 +38,59 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             .all()
         )
 
-        if user.is_staff or user.is_superuser:
-            return queryset
+        if not (user.is_staff or user.is_superuser):
+            queryset = queryset.filter(customer=user)
 
-        return queryset.filter(customer=user)
+        status_filter = self.request.query_params.get("status")
+        priority = self.request.query_params.get("priority")
+        category = self.request.query_params.get("category")
+        assigned_to = self.request.query_params.get("assigned_to")
+        customer = self.request.query_params.get("customer")
+        order = self.request.query_params.get("order")
+        product = self.request.query_params.get("product")
+        ordering = self.request.query_params.get("ordering")
+
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        if priority:
+            queryset = queryset.filter(priority=priority)
+
+        if category:
+            queryset = queryset.filter(category=category)
+
+        if order:
+            queryset = queryset.filter(order_id=order)
+
+        if product:
+            queryset = queryset.filter(product_id=product)
+
+        if assigned_to:
+            if assigned_to == "me":
+                queryset = queryset.filter(assigned_to=user)
+            elif user.is_staff or user.is_superuser:
+                queryset = queryset.filter(assigned_to_id=assigned_to)
+
+        if customer and (user.is_staff or user.is_superuser):
+            queryset = queryset.filter(customer_id=customer)
+
+        allowed_ordering_fields = {
+            "created_at",
+            "-created_at",
+            "updated_at",
+            "-updated_at",
+            "last_message_at",
+            "-last_message_at",
+            "status",
+            "-status",
+            "priority",
+            "-priority",
+        }
+
+        if ordering in allowed_ordering_fields:
+            queryset = queryset.order_by(ordering)
+
+        return queryset
 
     def get_permissions(self):
         if self.action in ["assign", "resolve", "close", "reopen"]:
