@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.support.models import SupportTicket, TicketMessage
+from apps.support.notifications import create_support_notification
 from apps.support.permissions import (
     IsSupportStaff,
     IsTicketParticipantOrSupportStaff,
@@ -92,6 +93,22 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             update_fields.append("status")
 
         ticket.save(update_fields=update_fields)
+        
+        if not is_internal_note:
+            if request.user.is_staff or request.user.is_superuser:
+                create_support_notification(
+                    user=ticket.customer,
+                    ticket=ticket,
+                    template_key="support_ticket_staff_replied",
+                    ticket_number=ticket.ticket_number,
+                )
+            elif ticket.assigned_to:
+                create_support_notification(
+                    user=ticket.assigned_to,
+                    ticket=ticket,
+                    template_key="support_ticket_customer_replied",
+                    ticket_number=ticket.ticket_number,
+                )
 
         response_serializer = self.get_serializer(ticket)
 
@@ -111,6 +128,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
         ticket.assigned_to = serializer.validated_data["assigned_to"]
         ticket.save(update_fields=["assigned_to", "updated_at"])
+        
+        create_support_notification(
+            user=ticket.assigned_to,
+            ticket=ticket,
+            template_key="support_ticket_assigned",
+            ticket_number=ticket.ticket_number,
+        )
 
         response_serializer = self.get_serializer(ticket)
 
@@ -125,6 +149,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def resolve(self, request, pk=None):
         ticket = self.get_object()
         ticket.mark_resolved()
+        
+        create_support_notification(
+            user=ticket.customer,
+            ticket=ticket,
+            template_key="support_ticket_resolved",
+            ticket_number=ticket.ticket_number,
+        )
 
         serializer = self.get_serializer(ticket)
 
@@ -139,6 +170,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def close(self, request, pk=None):
         ticket = self.get_object()
         ticket.close()
+        
+        create_support_notification(
+            user=ticket.customer,
+            ticket=ticket,
+            template_key="support_ticket_closed",
+            ticket_number=ticket.ticket_number,
+        )
 
         serializer = self.get_serializer(ticket)
 
@@ -153,6 +191,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def reopen(self, request, pk=None):
         ticket = self.get_object()
         ticket.reopen()
+        
+        create_support_notification(
+            user=ticket.customer,
+            ticket=ticket,
+            template_key="support_ticket_reopened",
+            ticket_number=ticket.ticket_number,
+        )
 
         serializer = self.get_serializer(ticket)
 

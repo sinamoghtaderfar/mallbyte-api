@@ -151,6 +151,48 @@ NOTIFICATION_TEMPLATES = {
         "notification_type": Notification.NotificationType.PRODUCT,
         "priority": Notification.Priority.HIGH,
     },
+        "support_ticket_created": {
+        "title": "Support ticket created",
+        "message": "Your support ticket #{ticket_number} has been created.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "support_ticket_staff_replied": {
+        "title": "Support replied",
+        "message": "Support has replied to your ticket #{ticket_number}.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "support_ticket_customer_replied": {
+        "title": "Customer replied",
+        "message": "Customer replied to support ticket #{ticket_number}.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "support_ticket_assigned": {
+        "title": "Support ticket assigned",
+        "message": "Support ticket #{ticket_number} has been assigned to you.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "support_ticket_resolved": {
+        "title": "Support ticket resolved",
+        "message": "Your support ticket #{ticket_number} has been resolved.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "support_ticket_closed": {
+        "title": "Support ticket closed",
+        "message": "Your support ticket #{ticket_number} has been closed.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
+    "support_ticket_reopened": {
+        "title": "Support ticket reopened",
+        "message": "Your support ticket #{ticket_number} has been reopened.",
+        "notification_type": Notification.NotificationType.SUPPORT,
+        "priority": Notification.Priority.NORMAL,
+    },
 }
 
 

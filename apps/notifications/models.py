@@ -13,6 +13,7 @@ class Notification(models.Model):
         SYSTEM = "system", "System"
         PRODUCT = "product", "Product"
         INVENTORY = "inventory", "Inventory"
+        SUPPORT = "support", "Support"
 
     class Channel(models.TextChoices):
         IN_APP = "in_app", "In App"

@@ -3,6 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.support.notifications import create_support_notification
 from apps.support.models import SupportTicket, TicketMessage
 
 User = get_user_model()
@@ -130,6 +131,13 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             ticket=ticket,
             sender=request.user,
             message=initial_message,
+        )
+        
+        create_support_notification(
+            user=ticket.customer,
+            ticket=ticket,
+            template_key="support_ticket_created",
+            ticket_number=ticket.ticket_number,
         )
 
         return ticket
