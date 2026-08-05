@@ -675,3 +675,214 @@ def get_analytics_timeseries(*, period="month", start_date=None, end_date=None):
         },
         "points": points,
     }
+    
+def get_order_status_breakdown(start_at, end_at):
+    orders = Order.objects.all()
+    orders = filter_by_date_range(orders, "created_at", start_at, end_at)
+
+    return [
+        {
+            "status": value,
+            "label": label,
+            "count": orders.filter(status=value).count(),
+        }
+        for value, label in Order.StatusChoices.choices
+    ]
+
+
+def get_payment_provider_breakdown(start_at, end_at):
+    payments = Payment.objects.all()
+    payments = filter_by_date_range(payments, "created_at", start_at, end_at)
+
+    rows = (
+        payments.values("provider")
+        .annotate(
+            count=Count("id"),
+            total_amount=Sum("amount"),
+            success_count=Count(
+                "id",
+                filter=Q(status=Payment.StatusChoices.SUCCESS),
+            ),
+        )
+        .order_by("-count")
+    )
+
+    return [
+        {
+            "provider": row["provider"] or "unknown",
+            "count": row["count"] or 0,
+            "success_count": row["success_count"] or 0,
+            "total_amount": money(row["total_amount"]),
+        }
+        for row in rows
+    ]
+
+
+def get_revenue_by_category_breakdown(start_at, end_at, limit=10):
+    order_items = OrderItem.objects.filter(
+        order__payment_status=Order.PaymentStatusChoices.PAID,
+    )
+
+    order_items = filter_by_date_range(
+        order_items,
+        "order__created_at",
+        start_at,
+        end_at,
+    )
+
+    rows = (
+        order_items.values(
+            "product__category_id",
+            "product__category__name",
+        )
+        .annotate(
+            revenue=Sum("total_price"),
+            quantity_sold=Sum("quantity"),
+            orders_count=Count("order", distinct=True),
+        )
+        .order_by("-revenue")[:limit]
+    )
+
+    return [
+        {
+            "category_id": row["product__category_id"],
+            "category_name": row["product__category__name"] or "Unknown",
+            "revenue": money(row["revenue"]),
+            "quantity_sold": number(row["quantity_sold"]),
+            "orders_count": number(row["orders_count"]),
+        }
+        for row in rows
+    ]
+
+
+def get_top_selling_products_breakdown(start_at, end_at, limit=10):
+    order_items = OrderItem.objects.filter(
+        order__payment_status=Order.PaymentStatusChoices.PAID,
+    )
+
+    order_items = filter_by_date_range(
+        order_items,
+        "order__created_at",
+        start_at,
+        end_at,
+    )
+
+    rows = (
+        order_items.values(
+            "product_id",
+            "product__name",
+            "product__sku",
+            "product__category__name",
+        )
+        .annotate(
+            quantity_sold=Sum("quantity"),
+            revenue=Sum("total_price"),
+            orders_count=Count("order", distinct=True),
+        )
+        .order_by("-quantity_sold", "-revenue")[:limit]
+    )
+
+    return [
+        {
+            "product_id": row["product_id"],
+            "name": row["product__name"],
+            "sku": row["product__sku"],
+            "category_name": row["product__category__name"] or "Unknown",
+            "quantity_sold": number(row["quantity_sold"]),
+            "revenue": money(row["revenue"]),
+            "orders_count": number(row["orders_count"]),
+        }
+        for row in rows
+    ]
+
+
+def get_review_status_breakdown(start_at, end_at):
+    reviews = ProductReview.objects.all()
+    reviews = filter_by_date_range(reviews, "created_at", start_at, end_at)
+
+    return [
+        {
+            "status": value,
+            "label": label,
+            "count": reviews.filter(status=value).count(),
+        }
+        for value, label in ProductReview.StatusChoices.choices
+    ]
+
+
+def get_support_category_breakdown(start_at, end_at):
+    tickets = SupportTicket.objects.all()
+    tickets = filter_by_date_range(tickets, "created_at", start_at, end_at)
+
+    return [
+        {
+            "category": value,
+            "label": label,
+            "count": tickets.filter(category=value).count(),
+            "open_count": tickets.filter(
+                category=value,
+                status=SupportTicket.StatusChoices.OPEN,
+            ).count(),
+            "urgent_count": tickets.filter(
+                category=value,
+                priority=SupportTicket.PriorityChoices.URGENT,
+            ).count(),
+        }
+        for value, label in SupportTicket.CategoryChoices.choices
+    ]
+
+
+def get_return_reason_breakdown(start_at, end_at):
+    returns = ReturnRequest.objects.all()
+    returns = filter_by_date_range(returns, "created_at", start_at, end_at)
+
+    return [
+        {
+            "reason": value,
+            "label": label,
+            "count": returns.filter(reason=value).count(),
+            "requested_amount": money(
+                returns.filter(reason=value).aggregate(
+                    total=Sum("total_requested_amount")
+                )["total"]
+            ),
+            "approved_amount": money(
+                returns.filter(reason=value).aggregate(
+                    total=Sum("total_approved_amount")
+                )["total"]
+            ),
+        }
+        for value, label in ReturnRequest.Reason.choices
+    ]
+
+
+def get_analytics_breakdown(*, period="month", start_date=None, end_date=None, limit=10):
+    start_at, end_at = get_date_range(
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    return {
+        "filters": {
+            "period": period,
+            "start_at": start_at.isoformat() if start_at else None,
+            "end_at": end_at.isoformat() if end_at else None,
+            "limit": limit,
+        },
+        "orders_by_status": get_order_status_breakdown(start_at, end_at),
+        "payments_by_provider": get_payment_provider_breakdown(start_at, end_at),
+        "revenue_by_category": get_revenue_by_category_breakdown(
+            start_at,
+            end_at,
+            limit=limit,
+        ),
+        "top_selling_products": get_top_selling_products_breakdown(
+            start_at,
+            end_at,
+            limit=limit,
+        ),
+        "reviews_by_status": get_review_status_breakdown(start_at, end_at),
+        "support_by_category": get_support_category_breakdown(start_at, end_at),
+        "returns_by_reason": get_return_reason_breakdown(start_at, end_at),
+    }
