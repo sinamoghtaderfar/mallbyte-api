@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "apps.content",
     "apps.analytics",
     "django_celery_beat",
+    "apps.observability",
     
 ]
 
@@ -69,6 +70,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.observability.middleware.RequestLogMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -237,3 +239,19 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+################################
+
+OBSERVABILITY_SLOW_REQUEST_THRESHOLD_MS = 1000
+OBSERVABILITY_ERROR_SPIKE_WINDOW_MINUTES = 10
+OBSERVABILITY_ERROR_SPIKE_THRESHOLD = 5
+OBSERVABILITY_CPU_WARNING_PERCENT = 90
+OBSERVABILITY_MEMORY_WARNING_PERCENT = 90
+OBSERVABILITY_DISK_WARNING_PERCENT = 85
+OBSERVABILITY_DISK_PATH = "/"
+
+OBSERVABILITY_EXCLUDED_PATH_PREFIXES = [
+    "/static/",
+    "/media/",
+    "/favicon.ico",
+]
