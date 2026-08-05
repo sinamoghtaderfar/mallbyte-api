@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.contrib.auth import get_user_model
 from django.db.models import Avg, Count, F, Q, Sum
 from django.utils import timezone
+from django.db.models.functions import TruncDate
 
 from apps.content.models import Announcement, Banner, ContentPage, FAQItem
 from apps.inventory.models import Stock
@@ -506,4 +507,171 @@ def get_dashboard_analytics(*, period="month", start_date=None, end_date=None):
         "returns": get_return_summary(start_at, end_at),
         "content": get_content_summary(start_at, end_at),
         "trends": get_trend_summary(start_at, end_at),
+    }
+    
+def get_date_points(start_at, end_at):
+    points = []
+
+    current_date = start_at.date()
+    end_date = end_at.date()
+
+    while current_date <= end_date:
+        points.append(current_date)
+        current_date += timedelta(days=1)
+
+    return points
+
+
+def get_analytics_timeseries(*, period="month", start_date=None, end_date=None):
+    start_at, end_at = get_date_range(
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    if not start_at or not end_at:
+        start_at = timezone.now() - timedelta(days=30)
+        end_at = timezone.now()
+
+    payments = Payment.objects.filter(
+        status=Payment.StatusChoices.SUCCESS,
+    )
+    payments = filter_by_date_range(
+        payments,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    payment_rows = (
+        payments.annotate(date=TruncDate("created_at"))
+        .values("date")
+        .annotate(
+            revenue=Sum("amount"),
+            successful_payments_count=Count("id"),
+        )
+        .order_by("date")
+    )
+
+    payment_map = {
+        row["date"]: {
+            "revenue": row["revenue"] or Decimal("0"),
+            "successful_payments_count": row["successful_payments_count"] or 0,
+        }
+        for row in payment_rows
+    }
+
+    orders = Order.objects.all()
+    orders = filter_by_date_range(
+        orders,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    order_rows = (
+        orders.annotate(date=TruncDate("created_at"))
+        .values("date")
+        .annotate(
+            orders_count=Count("id"),
+            paid_orders_count=Count(
+                "id",
+                filter=Q(payment_status=Order.PaymentStatusChoices.PAID),
+            ),
+        )
+        .order_by("date")
+    )
+
+    order_map = {
+        row["date"]: {
+            "orders_count": row["orders_count"] or 0,
+            "paid_orders_count": row["paid_orders_count"] or 0,
+        }
+        for row in order_rows
+    }
+
+    users = User.objects.all()
+    users = filter_by_date_range(
+        users,
+        "date_joined",
+        start_at,
+        end_at,
+    )
+
+    user_rows = (
+        users.annotate(date=TruncDate("date_joined"))
+        .values("date")
+        .annotate(
+            new_users_count=Count("id"),
+        )
+        .order_by("date")
+    )
+
+    user_map = {
+        row["date"]: row["new_users_count"] or 0
+        for row in user_rows
+    }
+
+    points = []
+
+    total_revenue = Decimal("0")
+    total_orders = 0
+    total_paid_orders = 0
+    total_successful_payments = 0
+    total_new_users = 0
+
+    for current_date in get_date_points(start_at, end_at):
+        payment_data = payment_map.get(
+            current_date,
+            {
+                "revenue": Decimal("0"),
+                "successful_payments_count": 0,
+            },
+        )
+
+        order_data = order_map.get(
+            current_date,
+            {
+                "orders_count": 0,
+                "paid_orders_count": 0,
+            },
+        )
+
+        revenue = payment_data["revenue"]
+        orders_count = order_data["orders_count"]
+        paid_orders_count = order_data["paid_orders_count"]
+        successful_payments_count = payment_data["successful_payments_count"]
+        new_users_count = user_map.get(current_date, 0)
+
+        total_revenue += revenue
+        total_orders += orders_count
+        total_paid_orders += paid_orders_count
+        total_successful_payments += successful_payments_count
+        total_new_users += new_users_count
+
+        points.append(
+            {
+                "date": current_date.isoformat(),
+                "revenue": money(revenue),
+                "orders_count": orders_count,
+                "paid_orders_count": paid_orders_count,
+                "successful_payments_count": successful_payments_count,
+                "new_users_count": new_users_count,
+            }
+        )
+
+    return {
+        "filters": {
+            "period": period,
+            "start_at": start_at.isoformat(),
+            "end_at": end_at.isoformat(),
+        },
+        "totals": {
+            "revenue": money(total_revenue),
+            "orders_count": total_orders,
+            "paid_orders_count": total_paid_orders,
+            "successful_payments_count": total_successful_payments,
+            "new_users_count": total_new_users,
+        },
+        "points": points,
     }

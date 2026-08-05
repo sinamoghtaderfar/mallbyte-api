@@ -1,6 +1,9 @@
 from django.urls import path
 
-from apps.analytics.views import DashboardAnalyticsView
+from apps.analytics.views import (
+    AnalyticsTimeSeriesView,
+    DashboardAnalyticsView,
+)
 
 
 urlpatterns = [
@@ -8,5 +11,10 @@ urlpatterns = [
         "dashboard/",
         DashboardAnalyticsView.as_view(),
         name="analytics-dashboard",
+    ),
+    path(
+        "timeseries/",
+        AnalyticsTimeSeriesView.as_view(),
+        name="analytics-timeseries",
     ),
 ]
