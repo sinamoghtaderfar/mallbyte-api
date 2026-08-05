@@ -10,44 +10,96 @@ User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """serializers to display user info"""
+    """Serializer to display user info"""
 
     class Meta:
         model = User
-        fields = ["id", "phone", "email", "full_name", "is_seller"]
-        read_only_fields = ["id", "is_seller"]
+        fields = [
+            "id",
+            "email",
+            "phone",
+            "full_name",
+            "is_seller",
+            "email_verified",
+        ]
+        read_only_fields = [
+            "id",
+            "is_seller",
+            "email_verified",
+        ]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     """Serializer for registering a new user"""
 
     password = serializers.CharField(
-        write_only=True, required=True, validators=[validate_password]
+        write_only=True,
+        required=True,
+        validators=[validate_password],
     )
-    password2 = serializers.CharField(write_only=True, required=True)
+    password2 = serializers.CharField(
+        write_only=True,
+        required=True,
+    )
+    phone = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=15,
+    )
 
     class Meta:
         model = User
-        fields = ["phone", "email", "full_name", "password", "password2"]
+        fields = [
+            "email",
+            "phone",
+            "full_name",
+            "password",
+            "password2",
+        ]
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+    def validate_phone(self, value):
+        if not value:
+            return None
+
+        cleaned = re.sub(r'[\s\-\(\)]', '', value)
+
+        pattern = r'^\+\d{1,3}\d{4,14}$'
+        if not re.match(pattern, cleaned):
+            raise serializers.ValidationError(
+                "Phone must be in international format: +[country code][number]"
+            )
+
+        return cleaned
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password2"]:
-            raise serializers.ValidationError({"password": "Passwords don't match"})
+            raise serializers.ValidationError(
+                {
+                    "password": "Passwords don't match"
+                }
+            )
+
         return attrs
 
     def create(self, validated_data):
-
         validated_data.pop("password2")
+
         user = User.objects.create_user(**validated_data)
+
         try:
             from apps.rbac.models import Role
             from apps.rbac.utils import assign_role
-            
-            customer_role = Role.objects.get(name='customer')
-            assign_role(user, customer_role, None)  # assigned_by = None
-            print(f"Role 'customer' assigned to new user {user.phone}")
+
+            customer_role = Role.objects.get(name="customer")
+            assign_role(user, customer_role, None)
+
         except Role.DoesNotExist:
-            print("Role 'customer' not found!")
+            pass
+
         return user
 
 
@@ -111,33 +163,28 @@ class AddressSerializer(serializers.ModelSerializer):
 
 
 class OTPRequestSerializer(serializers.Serializer):
-    """Serializer for requesting OTP"""
-    phone = serializers.CharField(max_length = 15)
-    
-    
-    def validate_phone(self, value):
-        """Validate phone number"""
-        cleaned = re.sub(r'[\s\-\(\)]', '', value)
-        
-        pattern = r'^\+\d{1,3}\d{4,14}$'
-        if not re.match(pattern, cleaned):
-            raise serializers.ValidationError(
-                "Phone must be in international format: +[country code][number] (e.g., +989121234567)"
-            )
-        
-        return cleaned
+    """Serializer for requesting email OTP"""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.strip().lower()
     
     
 
 class OTPVerifySerializer(serializers.Serializer):
-    """Serializer for verifying OTP"""
-    phone = serializers.CharField(max_length = 15)
+    """Serializer for verifying email OTP"""
+
+    email = serializers.EmailField()
     code = serializers.CharField(max_length=6)
-    
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
     def validate_code(self, value):
-        """Validate code is 6 digits"""
         if not value.isdigit() or len(value) != 6:
             raise serializers.ValidationError("Code must be 6 digits")
+
         return value
     
     
@@ -199,36 +246,38 @@ class AdminSellerActionSerializer(serializers.Serializer):
     
 class PasswordResetRequestSerializer(serializers.Serializer):
     """Serializer for requesting password reset"""
-    phone = serializers.CharField(max_length = 15)
-    
-    def validate_phone(self, value):
-        #remove space -
-        cleaned = re.sub(r'[\s\-\(\)]', '', value)
-        
-        pattern = r'^\+\d{1,3}\d{4,14}$'
-        
-        if not re.match(pattern, cleaned):
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        email = value.strip().lower()
+
+        if not User.objects.filter(email=email).exists():
             raise serializers.ValidationError(
-                "Phone must be in international format: +[country code][number]"
+                "No user found with this email address"
             )
-        return cleaned
+
+        return email
 
 class PasswordResetVerifySerializer(serializers.Serializer):
     """Serializer for verifying OTP and resetting password"""
-    phone = serializers.CharField(max_length = 15)
-    code = serializers.CharField(max_length = 6)
-    new_password = serializers.CharField(write_only=True, min_length=8)
-    confirm_password = serializers.CharField(write_only=True, min_length=8)
-    
+
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        validators=[validate_password],
+    )
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
     def validate_code(self, value):
-        if not value.isdigit() or len(value) !=6:
+        if not value.isdigit() or len(value) != 6:
             raise serializers.ValidationError("Code must be 6 digits")
+
         return value
-    
-    def validate(self, attrs):
-        if attrs['new_password'] != attrs['confirm_password']:
-            raise serializers.ValidationError({"new_password": "Passwords don't match"})
-        return attrs
 
 class ChangePasswordSerializer(serializers.Serializer):
     """Serializer for changing password (when logged in)"""

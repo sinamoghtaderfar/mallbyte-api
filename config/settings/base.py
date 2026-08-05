@@ -255,3 +255,37 @@ OBSERVABILITY_EXCLUDED_PATH_PREFIXES = [
     "/media/",
     "/favicon.ico",
 ]
+
+def env_bool(name, default=False):
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    return value.lower() in ["1", "true", "yes", "on"]
+
+
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend",
+)
+
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp-relay.brevo.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "MallByte <no-reply@mallbyte.local>",
+)
+
+OTP_CODE_EXPIRY_SECONDS = int(os.getenv("OTP_CODE_EXPIRY_SECONDS", "120"))
+
+OTP_EMAIL_SUBJECT = os.getenv(
+    "OTP_EMAIL_SUBJECT",
+    "Your MallByte verification code",
+)

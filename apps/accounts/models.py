@@ -1,7 +1,10 @@
+from email import message
 import random
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.contrib.messages.api import success
 from django.db import models
 from django.utils import timezone
 
@@ -16,29 +19,40 @@ class UserManager(BaseUserManager):
     def get(self, *args, **kwargs):
         return self.get_queryset().get(*args, **kwargs)
 
-    def create_user(self, phone, email, full_name, password=None, **extra_fields):
-        if not phone:
-            raise ValueError("Phone number is required")
+    def create_user(self, email, full_name="", password=None, phone=None, **extra_fields):
         if not email:
             raise ValueError("Email is required")
 
         email = self.normalize_email(email)
-        user = self.model(phone=phone, email=email, full_name=full_name, **extra_fields)
+        user = self.model(
+            email=email,
+            full_name=full_name,
+            phone=phone,
+            **extra_fields,
+    )
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, phone, email, full_name, password=None, **extra_fields):
+
+    def create_superuser(self, email, full_name="", password=None, phone=None, **extra_fields):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True.")
+
         if extra_fields.get("is_superuser") is not True:
             raise ValueError("Superuser must have is_superuser=True.")
 
-        return self.create_user(phone, email, full_name, password, **extra_fields)
+        return self.create_user(
+        email=email,
+        full_name=full_name,
+        password=password,
+        phone=phone,
+        **extra_fields,
+    )
 
 
 class User(AbstractUser):
@@ -49,8 +63,13 @@ class User(AbstractUser):
     # Remove the default username field
     username = None
 
-    # Unique phone for login
-    phone = models.CharField(max_length=15, unique=True, verbose_name="Phone Number")
+    phone = models.CharField(
+    max_length=15,
+    unique=True,
+    null=True,
+    blank=True,
+    verbose_name="Phone Number",
+    )
 
     # Unique email
     email = models.EmailField(unique=True, verbose_name="Email")
@@ -89,11 +108,9 @@ class User(AbstractUser):
         related_query_name="custom_user_permissions",
     )
     roles = models.ManyToManyField("rbac.Role", through="rbac.UserRole", through_fields=("user", "role"), related_name="users", blank=True, verbose_name="Roles")
-    # Field used for login
-    USERNAME_FIELD = "phone"
-
-    # Required fields when creating superuser
-    REQUIRED_FIELDS = ["email", "full_name"]
+    
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["full_name"]
 
     class Meta:
         verbose_name = "User"
@@ -101,7 +118,7 @@ class User(AbstractUser):
 
     # String representation of the user
     def __str__(self):
-        return f"{self.full_name} - {self.phone}"
+        return f"{self.full_name} - {self.email}"
 
 
 class Profile(models.Model):
@@ -177,21 +194,31 @@ class Address(models.Model):
 class OTP(models.Model):
     """One-time password for phone verification"""
 
-    phone = models.CharField(max_length=15, verbose_name="Phone Number")
+    phone = models.CharField(
+    max_length=15,
+    null=True,
+    blank=True,
+    verbose_name="Phone Number",
+    )
     code = models.CharField(max_length=6, verbose_name="Verification Code")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(verbose_name="Expires At")
     is_used = models.BooleanField(default=False, verbose_name="Is Used")
+    email = models.EmailField(
+    db_index=True,
+    verbose_name="Email Address",
+    )
 
     class Meta:
         verbose_name = "OTP"
         verbose_name_plural = "OTPs"
         indexes = [
-            models.Index(fields=["phone", "created_at"]),
+            models.Index(fields=["email", "created_at"]),
         ]
 
     def __str__(self):
-        return f"{self.phone} - {self.code} - {'Used' if self.is_used else 'Active'}"
+        identifier = self.email or self.phone or "unknown"
+        return f"{identifier} - {'Used' if self.is_used else 'Active'}"
 
     @property
     def is_expired(self):
@@ -199,39 +226,61 @@ class OTP(models.Model):
         return timezone.now() > self.expires_at
 
     @classmethod
-    def generate_otp(cls, phone):
-        """Generate a new OTP for phone number"""
-        # Expire old OTPs for this phone
-        cls.objects.filter(phone=phone, is_used=False).update(is_used=True)
+    def generate_otp(cls, email):
+        """Generate a new OTP for an email address."""
+        normalized_email = email.strip().lower()
 
-        # Generate 6-digit code
+        cls.objects.filter(
+        email=normalized_email,
+        is_used=False,
+    ).update(is_used=True)
+
         code = "".join([str(random.randint(0, 9)) for _ in range(6)])
 
-        # Set expiry to 2 minutes from now
-        expires_at = timezone.now() + timedelta(minutes=2)
+        expires_at = timezone.now() + timedelta(
+            seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)
+        )
 
-        # Create and return new OTP
-        otp = cls.objects.create(phone=phone, code=code, expires_at=expires_at)
+        otp = cls.objects.create(
+            email=normalized_email,
+            code=code,
+            expires_at=expires_at,
+        )
+        
         return otp
 
     @classmethod
-    def verify_otp(cls, phone, code):
-        """Verify OTP code for phone number"""
+    def verify_otp(cls, email, code):
+        """Verify OTP code for an email address."""
+        success, message, _otp = cls.verify_otp_and_get_instance(
+            email=email,
+            code=code,
+    )
+
+        return success, message
+
+    @classmethod
+    def verify_otp_and_get_instance(cls, email, code):
+        """Verify OTP code and return the OTP instance."""
+        normalized_email = email.strip().lower()
+
         try:
-            otp = cls.objects.filter(phone=phone, code=code, is_used=False).latest("created_at")
+            otp = cls.objects.filter(
+                email=normalized_email,
+                code=code,
+                is_used=False,
+            ).latest("created_at")
 
             if otp.is_expired:
-                return False, "OTP has expired"
+                return False, "OTP has expired", None
 
-            # Mark as used
             otp.is_used = True
-            otp.save()
+            otp.save(update_fields=["is_used"])
 
-            return True, "OTP verified successfully"
+            return True, "OTP verified successfully", otp
 
         except cls.DoesNotExist:
-            return False, "Invalid OTP code"
-
+            return False, "Invalid OTP code", None
 
 class Seller(models.Model):
     """Seller information for multi-vendor marketplace"""
@@ -318,7 +367,19 @@ class Seller(models.Model):
         self.status = self.StatusChoices.APPROVED
         self.verified_by = admin_user
         self.verified_at = timezone.now()
-        self.save()
+        self.rejection_reason = ""
+        self.save(
+            update_fields=[
+                "status",
+                "verified_by",
+                "verified_at",
+                "rejection_reason",
+                "updated_at",
+            ]
+        )
+
+        self.user.is_seller = True
+        self.user.save(update_fields=["is_seller"])
 
         from apps.rbac.models import Role
         from apps.rbac.utils import assign_role
@@ -326,16 +387,26 @@ class Seller(models.Model):
         try:
             vendor_role = Role.objects.get(name="vendor")
             assign_role(self.user, vendor_role, admin_user)
-            print(f" Role 'vendor' assigned to user {self.user.phone}")
+
         except Role.DoesNotExist:
-            print(" Role 'vendor' not found!")
+            pass
 
     def reject(self, admin_user, reason):
         """Reject seller application"""
         self.status = self.StatusChoices.REJECTED
         self.verified_by = admin_user
         self.rejection_reason = reason
-        self.save()
+        self.save(
+            update_fields=[
+                "status",
+                "verified_by",
+                "rejection_reason",
+                "updated_at",
+            ]
+        )
+
+        self.user.is_seller = False
+        self.user.save(update_fields=["is_seller"])
 
         from apps.rbac.models import Role
         from apps.rbac.utils import remove_role
@@ -343,7 +414,7 @@ class Seller(models.Model):
         try:
             vendor_role = Role.objects.get(name="vendor")
             remove_role(self.user, vendor_role)
-            print(f" Role 'vendor' removed from user {self.user.phone}")
+
         except Role.DoesNotExist:
             pass
 

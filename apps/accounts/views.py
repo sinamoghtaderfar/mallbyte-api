@@ -1,34 +1,37 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
 from django.http import Http404
-from django.contrib.auth.hashers import check_password
 from django.utils import timezone
-from rest_framework import generics, permissions, status, viewsets
+
+from rest_framework import generics, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework import serializers
-from .permissions import IsAdminOrVendorManager
-from .models import Address, Profile, OTP, Seller
-from .utils import generate_email_verification_token, verify_email_token
+
+from .models import Address, OTP, Profile, Seller
+from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
 from .serializers import (
     AddressSerializer,
+    AdminSellerActionSerializer,
     ChangePasswordSerializer,
+    DeleteAccountSerializer,
+    EmailVerifyConfirmSerializer,
+    EmailVerifyRequestSerializer,
+    OTPRequestSerializer,
+    OTPVerifySerializer,
     PasswordResetRequestSerializer,
     PasswordResetVerifySerializer,
     ProfileSerializer,
     RegisterSerializer,
+    SellerApplicationSerializer,
+    SellerSerializer,
+    SellerUpdateSerializer,
     UserSerializer,
-    OTPRequestSerializer,
-    OTPVerifySerializer,
-    SellerApplicationSerializer, SellerSerializer, 
-    SellerUpdateSerializer, AdminSellerActionSerializer,
-    DeleteAccountSerializer,
-    EmailVerifyRequestSerializer, EmailVerifyConfirmSerializer
 )
-
-from django.core.mail import send_mail
-from django.conf import settings
+from .utils import generate_email_verification_token, verify_email_token
 
 
 User = get_user_model()
@@ -38,15 +41,15 @@ class RegisterView(generics.CreateAPIView):
     """Register a new user"""
 
     queryset = User.objects.all()
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = [permissions.AllowAny]
     serializer_class = RegisterSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
         user = serializer.save()
 
-        # Generate tokens
         refresh = RefreshToken.for_user(user)
 
         return Response(
@@ -60,13 +63,13 @@ class RegisterView(generics.CreateAPIView):
 
 
 class ProfileView(generics.RetrieveUpdateAPIView):
-    """show & edite profile"""
+    """Show and edit the authenticated user's profile"""
 
     serializer_class = ProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
-        profile, created = Profile.objects.get_or_create(user=self.request.user)
+        profile, _created = Profile.objects.get_or_create(user=self.request.user)
         return profile
 
 
@@ -77,58 +80,80 @@ class AddressViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        """Return only addresses for the current user"""
         return Address.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
-        """Set the user automatically when creating an address"""
         serializer.save(user=self.request.user)
 
     @action(detail=True, methods=["patch"])
     def set_default(self, request, pk=None):
-        """Set an address as default"""
         address = self.get_object()
 
-        # Unset any existing default address for this user
-        Address.objects.filter(user=request.user, is_default=True).update(
-            is_default=False
+        Address.objects.filter(
+            user=request.user,
+            is_default=True,
+        ).update(
+            is_default=False,
         )
 
-        # Set this address as default
         address.is_default = True
-        address.save()
+        address.save(update_fields=["is_default"])
 
-        return Response({"status": "default address set"}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "status": "default address set"
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class OTPRequestView(generics.GenericAPIView):
-    """Request OTP code"""
+    """Request email OTP code"""
+
     permission_classes = [permissions.AllowAny]
     serializer_class = OTPRequestSerializer
 
     def post(self, request):
-        
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        phone = serializer.validated_data['phone']
-        print(f"Phone: {phone}")
+        email = serializer.validated_data["email"]
 
-        # Generate OTP
-        otp = OTP.generate_otp(phone)
-        print(f"OTP generated: {otp.code}")
+        otp = OTP.generate_otp(email=email)
 
-        # TODO: Send SMS via Kavenegar or similar service
-        # For now, just print to console
+        try:
+            send_otp_email(
+                to_email=email,
+                code=otp.code,
+                expires_in_seconds=settings.OTP_CODE_EXPIRY_SECONDS,
+            )
 
-        return Response({
-            'message': 'OTP sent successfully',
-            'expires_in': 120
-        }, status=status.HTTP_200_OK)
+        except OTPDeliveryError as exc:
+            otp.is_used = True
+            otp.save(update_fields=["is_used"])
+
+            return Response(
+                {
+                    "error": "OTP email could not be sent.",
+                    "detail": str(exc),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "message": "OTP sent successfully",
+                "delivery_channel": "email",
+                "email": mask_email(email),
+                "expires_in": settings.OTP_CODE_EXPIRY_SECONDS,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class OTPVerifyView(generics.GenericAPIView):
-    """Verify OTP and login/register user"""
+    """Verify email OTP and login/register user"""
+
     permission_classes = [permissions.AllowAny]
     serializer_class = OTPVerifySerializer
 
@@ -136,78 +161,109 @@ class OTPVerifyView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        phone = serializer.validated_data['phone']
-        code = serializer.validated_data['code']
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
 
-        # Verify OTP
-        success, message = OTP.verify_otp(phone, code)
-
-        if not success:
-            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Get or create user
-        user, created = User.objects.get_or_create(
-            phone=phone,
-            defaults={
-                'email': f"{phone}@temp.com",  # Temporary email
-                'full_name': f"User {phone[-4:]}",  # Temporary name
-                'is_active': True
-            }
+        success, message, _otp = OTP.verify_otp_and_get_instance(
+            email=email,
+            code=code,
         )
 
-        # Generate tokens
+        if not success:
+            return Response(
+                {
+                    "error": message
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = User.objects.filter(email=email).first()
+        created = False
+
+        if user is None:
+            user = User.objects.create_user(
+                email=email,
+                full_name=f"User {email.split('@')[0]}",
+                password=None,
+                is_active=True,
+                email_verified=True,
+                email_verified_at=timezone.now(),
+            )
+            created = True
+
+        update_fields = []
+
+        if not user.email_verified:
+            user.email_verified = True
+            user.email_verified_at = timezone.now()
+            update_fields.extend(
+                [
+                    "email_verified",
+                    "email_verified_at",
+                ]
+            )
+
+        if update_fields:
+            user.save(update_fields=update_fields)
+
         refresh = RefreshToken.for_user(user)
 
-        return Response({
-            'user': UserSerializer(user).data,
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'is_new': created
-        }, status=status.HTTP_200_OK)
-        
+        return Response(
+            {
+                "user": UserSerializer(user).data,
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "is_new": created,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class SellerApplyView(generics.CreateAPIView):
     """Apply to become a seller"""
+
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = SellerApplicationSerializer
-    #parser_classes = [MultiPartParser, FormParser]
 
     def perform_create(self, serializer):
-        # Check if user already has a seller profile
-        if hasattr(self.request.user, 'seller'):
+        if hasattr(self.request.user, "seller"):
             raise serializers.ValidationError(
-                {"error": "You already have a seller profile"}
+                {
+                    "error": "You already have a seller profile"
+                }
             )
-        
+
         serializer.save(user=self.request.user)
-        
+
+
 class SellerStatusView(generics.RetrieveAPIView):
     """Check seller application status"""
-    
+
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = SellerSerializer
-    
+
     def get_object(self):
         try:
             return self.request.user.seller
-        
+
         except Seller.DoesNotExist:
-            
             raise Http404("No seller profile found")
 
-            
-            
+
 class IsSellerPermission(permissions.BasePermission):
     """Permission check for verified sellers"""
-    
+
     def has_permission(self, request, view):
-        return(
-            request.user.is_authenticated and 
-            hasattr(request.user, 'seller') and 
-            request.user.seller.is_verified
+        return (
+            request.user.is_authenticated
+            and hasattr(request.user, "seller")
+            and request.user.seller.is_verified
         )
-        
+
+
 class SellerDashboardView(generics.RetrieveAPIView):
     """Seller dashboard with stats"""
+
     permission_classes = [IsSellerPermission]
     serializer_class = SellerSerializer
 
@@ -217,6 +273,7 @@ class SellerDashboardView(generics.RetrieveAPIView):
 
 class SellerStoreView(generics.RetrieveUpdateAPIView):
     """View and update store information"""
+
     permission_classes = [IsSellerPermission]
     serializer_class = SellerUpdateSerializer
     parser_classes = [MultiPartParser, FormParser]
@@ -226,445 +283,474 @@ class SellerStoreView(generics.RetrieveUpdateAPIView):
 
 
 class AdminSellersListView(generics.ListAPIView):
-    """Admin: List all sellers with filters"""
+    """Admin: list all sellers with optional filters"""
+
     permission_classes = [permissions.IsAdminUser]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
-        queryset = Seller.objects.all()
-        
-        # Filter by status
-        status = self.request.query_params.get('status')
-        if status:
-            queryset = queryset.filter(status=status)
-        
-        # Search by store name
-        search = self.request.query_params.get('search')
+        queryset = Seller.objects.select_related(
+            "user",
+            "verified_by",
+        ).all()
+
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        search = self.request.query_params.get("search")
         if search:
             queryset = queryset.filter(store_name__icontains=search)
-        
-        return queryset.order_by('-applied_at')
+
+        return queryset.order_by("-applied_at")
 
 
 class AdminSellerDetailView(generics.RetrieveAPIView):
-    """Admin: View seller details"""
+    """Admin: view seller details"""
+
     permission_classes = [permissions.IsAdminUser]
-    queryset = Seller.objects.all()
     serializer_class = SellerSerializer
+
+    def get_queryset(self):
+        return Seller.objects.select_related(
+            "user",
+            "verified_by",
+        ).all()
+
+
+class AdminPendingSellersView(generics.ListAPIView):
+    """Admin: list pending seller applications"""
+
+    permission_classes = [permissions.IsAdminUser]
+    serializer_class = SellerSerializer
+
+    def get_queryset(self):
+        return Seller.objects.select_related(
+            "user",
+            "verified_by",
+        ).filter(
+            status=Seller.StatusChoices.PENDING,
+        ).order_by("-applied_at")
 
 
 class AdminSellerVerifyView(generics.GenericAPIView):
-    """Admin: Verify seller"""
+    """Admin: approve a pending seller application"""
+
     permission_classes = [permissions.IsAdminUser]
-    serializer_class = AdminSellerActionSerializer
+    serializer_class = SellerSerializer
 
     def post(self, request, pk):
         try:
-            seller = Seller.objects.get(pk=pk)
+            seller = Seller.objects.select_related("user").get(pk=pk)
+
         except Seller.DoesNotExist:
             return Response(
-                {"error": "Seller not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {
+                    "error": "Seller not found"
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
-        
+
+        if seller.status != Seller.StatusChoices.PENDING:
+            return Response(
+                {
+                    "error": "Only pending seller applications can be approved"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         seller.approve(request.user)
+        seller.refresh_from_db()
+
         return Response(
-            {"message": f"Seller {seller.store_name} approved successfully"},
-            status=status.HTTP_200_OK
+            {
+                "message": f"Seller {seller.store_name} approved successfully",
+                "seller": SellerSerializer(
+                    seller,
+                    context={
+                        "request": request
+                    },
+                ).data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 
 class AdminSellerRejectView(generics.GenericAPIView):
-    """Admin: Reject seller"""
+    """Admin: reject a pending seller application"""
+
     permission_classes = [permissions.IsAdminUser]
-    serializer_class = AdminSellerActionSerializer
-
-    def post(self, request, pk):
-        print(f"\nREJECT VIEW CALLED for seller {pk}")
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        try:
-            seller = Seller.objects.get(pk=pk)
-        except Seller.DoesNotExist:
-            return Response(
-                {"error": "Seller not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        reason = serializer.validated_data.get('reason', '')
-        seller.reject(request.user, reason)
-        print(f"   Status after reject: {seller.status}")
-        return Response(
-            {"message": f"Seller {seller.store_name} rejected"},
-            status=status.HTTP_200_OK
-        )
-        
-class AdminVerifySellerView(generics.GenericAPIView):
-    """
-    Admin view to verify or reject seller applications.
-    """
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrVendorManager]
-    serializer_class = AdminSellerActionSerializer
-    
-    def post(self, request, seller_id):
-        try:
-            seller = Seller.objects.get(id=seller_id, status = "pending")
-        except Seller.DoesNotExist:
-            return Response(
-                {"error": "Pending seller not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        action = request.data.get("action")
-        reason = request.data.get("reason", "")
-        
-        if action == 'approve':
-            seller.approve(request.user)
-            return Response({
-                "message": f"Seller {seller.store_name} approved successfully",
-                "seller": SellerSerializer(seller).data
-            }, status=status.HTTP_200_OK)
-
-        elif action == 'reject':
-            seller.reject(request.user, reason)
-            return Response({
-                "message": f"Seller {seller.store_name} rejected",
-                "seller": SellerSerializer(seller).data
-            }, status=status.HTTP_200_OK)
-
-        else:
-            return Response(
-                {"error": "Action must be 'approve' or 'reject'"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-class AdminPendingSellersView(generics.ListAPIView):
-    """
-    Admin view to list all pending seller applications.
-    """
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
-    def get_queryset(self):
-        return Seller.objects.filter(status='pending').order_by('-applied_at')
-    
+    def post(self, request, pk):
+        try:
+            seller = Seller.objects.select_related("user").get(pk=pk)
+
+        except Seller.DoesNotExist:
+            return Response(
+                {
+                    "error": "Seller not found"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if seller.status != Seller.StatusChoices.PENDING:
+            return Response(
+                {
+                    "error": "Only pending seller applications can be rejected"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = request.data.get("reason", "")
+
+        seller.reject(
+            admin_user=request.user,
+            reason=reason,
+        )
+        seller.refresh_from_db()
+
+        return Response(
+            {
+                "message": f"Seller {seller.store_name} rejected",
+                "seller": SellerSerializer(
+                    seller,
+                    context={
+                        "request": request
+                    },
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class PasswordResetRequestView(generics.CreateAPIView):
-    """Request password reset via OTP"""
+    """Request password reset via email OTP"""
+
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetRequestSerializer
-    
+
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception = True)
-        
-        phone = serializer.validated_data['phone']
-        
-        # Check if user exists
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        otp = OTP.generate_otp(email=email)
+
         try:
-            user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "No user found with this phone number"},
-                status=status.HTTP_404_NOT_FOUND
+            send_otp_email(
+                to_email=email,
+                code=otp.code,
+                expires_in_seconds=settings.OTP_CODE_EXPIRY_SECONDS,
             )
-        # Generate OTP
-        otp = OTP.generate_otp(phone)
-        print(f"\n📱 Password reset OTP for {phone}: {otp.code}\n")
-        
-        return Response({
-            'message': 'OTP sent successfully',
-            'expires_in': 120
-        }, status=status.HTTP_200_OK)
-        
+
+        except OTPDeliveryError as exc:
+            otp.is_used = True
+            otp.save(update_fields=["is_used"])
+
+            return Response(
+                {
+                    "error": "Password reset email could not be sent.",
+                    "detail": str(exc),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "message": "Password reset OTP sent successfully",
+                "delivery_channel": "email",
+                "email": mask_email(email),
+                "expires_in": settings.OTP_CODE_EXPIRY_SECONDS,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class PasswordResetVerifyView(generics.GenericAPIView):
-    """Verify OTP and reset password"""
-    
+    """Verify email OTP and reset password"""
+
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetVerifySerializer
-    
+
     def post(self, request):
-        serializer = self. get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
-        phone = serializer.validated_data['phone']
-        code = serializer.validated_data['code']
-        new_password = serializer.validated_data['new_password']
-        
-        # Verify OTP
-        success, message = OTP.verify_otp(phone, code)
-        
+
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
+        new_password = serializer.validated_data["new_password"]
+
+        success, message, _otp = OTP.verify_otp_and_get_instance(
+            email=email,
+            code=code,
+        )
+
         if not success:
-            return Response({'error': message}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get user and set new password
+            return Response(
+                {
+                    "error": message
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
-            user = User.objects.get(phone=phone)
+            user = User.objects.get(email=email)
+
         except User.DoesNotExist:
             return Response(
-                {"error": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {
+                    "error": "User not found"
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
+
         user.set_password(new_password)
-        user.save()
-        
-        return Response({
-            'message': 'Password reset successful'
-        }, status=status.HTTP_200_OK)
-        
+        user.save(update_fields=["password"])
+
+        return Response(
+            {
+                "message": "Password reset successful"
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ChangePasswordView(generics.GenericAPIView):
     """Change password for authenticated user"""
+
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ChangePasswordSerializer
-    
+
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         user = request.user
-        old_password = serializer.validated_data['old_password']
-        new_password = serializer.validated_data['new_password']
-        
-         # Check old password
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password"]
+
         if not user.check_password(old_password):
             return Response(
-                {"old_password": "Wrong password"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "old_password": "Wrong password"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        # Set new password
-        user.set_password(new_password)
-        user.save()
-        
-        return Response({
-            'message': 'Password changed successfully'
-        }, status=status.HTTP_200_OK)
-        
 
-class AdminSellerVerifyView(generics.GenericAPIView):
-    """Admin: Verify seller"""
-    permission_classes = [permissions.IsAdminUser]
-    serializer_class = AdminSellerActionSerializer
-    
-    def post(self, request, pk):
-        """Verify a seller account"""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            seller = Seller.Objects.get(pk=pk)
-            seller.is_verified = True
-        except Seller.DoesNotExist:
-            return Response({"detail": "Seller not found"}, status=status.HTTP_404_NOT_FOUND)
-        action = serializer.validated_data('action')
-        
-        if action == 'approve':
-            seller.approve(request.user)
-            
-            from apps.rbac.utils import log_admin_action
-            log_admin_action(
-                admin = request.user,
-                action_type = 'approve_seller',
-                target_user = seller.user,
-                details = {
-                    'seller_id': seller.id,
-                    'seller_name': seller.name,
-                },
-                request = request
-            )
-            return Response(
-                {"message": f"Seller {seller.store_name} approved successfully"},
-                status=status.HTTP_200_OK
-            )
-        elif action == 'reject':
-            reason = serializer.validated_data.get('reason', '')
-            seller.reject(request.user, reason)
-            
-            from apps.rbac.utils import log_admin_action
-            log_admin_action(
-                admin = request.user,
-                action = 'reject_seller',
-                target_user = seller.user,
-                details = {
-                    'seller_id': seller.id,
-                    'store_name': seller.store_name,
-                    'reason': reason,
-                },
-                request = request
-            )
-            return Response(
-                {"message": f"Seller {seller.store_name} rejected"},
-                status=status.HTTP_200_OK
-            )
-        else:
-            return Response({"error": "Action must be 'approve' or 'reject'"},
-                status=status.HTTP_400_BAD_REQUEST
-                )
-        
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+
+        return Response(
+            {
+                "message": "Password changed successfully"
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class DeleteAccountView(generics.GenericAPIView):
-    """Delete user account"""
+    """Delete authenticated user account"""
+
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = DeleteAccountSerializer
-    
+
     def delete(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         user = request.user
-        
-        # Soft delete
+
         user.is_deleted = True
         user.deleted_at = timezone.now()
         user.is_active = False
-        user.save()
-        
-        return Response({
-            'message': 'Your account has been deleted successfully'
-        }, status=status.HTTP_200_OK)
+        user.save(
+            update_fields=[
+                "is_deleted",
+                "deleted_at",
+                "is_active",
+            ]
+        )
+
+        return Response(
+            {
+                "message": "Your account has been deleted successfully"
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class AdminDeleteUserView(generics.GenericAPIView):
-    """Admin: Delete a user account"""
+    """Admin: delete a user account"""
+
     permission_classes = [permissions.IsAdminUser]
-    
+
     def delete(self, request, user_id):
         try:
             user = User.objects.get(id=user_id)
+
         except User.DoesNotExist:
             return Response(
-                {"error": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {
+                    "error": "User not found"
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
-        
-        
+
         if user.id == request.user.id:
             return Response(
-                {"error": "You cannot delete your own account"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "You cannot delete your own account"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        
+
         if user.is_superuser:
             return Response(
-                {"error": "Cannot delete super admin accounts"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "Cannot delete super admin accounts"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Soft delete
+
         user.is_deleted = True
         user.is_active = False
         user.deleted_at = timezone.now()
-        user.save()
-        
-        
+        user.save(
+            update_fields=[
+                "is_deleted",
+                "is_active",
+                "deleted_at",
+            ]
+        )
+
         from apps.rbac.utils import log_admin_action
+
         log_admin_action(
             admin=request.user,
-            action='delete_user',
+            action="delete_user",
             target_user=user,
             details={
-                'user_phone': user.phone,
-                'deleted_by': request.user.phone
+                "user_email": user.email,
+                "deleted_by": request.user.email,
             },
-            request=request
+            request=request,
         )
-        
-        return Response({
-            'message': f'User {user.phone} deleted successfully'
-        }, status=status.HTTP_200_OK)
-        
+
+        return Response(
+            {
+                "message": f"User {user.email} deleted successfully"
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class EmailVerifyRequestView(generics.GenericAPIView):
-    """Request email verification (send email with token)"""
+    """Request email verification"""
+
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = EmailVerifyRequestSerializer
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         user = request.user
-        new_email = serializer.validated_data['email']
-        
-        # if email already verified
+        new_email = serializer.validated_data["email"]
+
         if user.email_verified:
             return Response(
-                {"error": "Your email is already verified"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "Your email is already verified"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # save new email
+
         user.email = new_email
-        user.save()
-        
-        # generate token
+        user.save(update_fields=["email"])
+
         token = generate_email_verification_token(user)
-        
-        # make verification link
-        verification_link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
-        
-        # send email
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        verification_link = f"{frontend_url}/verify-email?token={token}"
+
         try:
             send_mail(
-                subject='Verify Your Email - MallByte',
-                message=f"""
-                    Hello {user.full_name or user.phone},
-
-                    Please click the link below to verify your email address:
-
-                    {verification_link}
-
-                    This link will expire in 1 hour.
-
-                    If you didn't request this, please ignore this email.
-
-                    Best regards,
-                    MallByte Team
-                    """,
+                subject="Verify Your Email - MallByte",
+                message=(
+                    f"Hello {user.full_name or user.email},\n\n"
+                    "Please click the link below to verify your email address:\n\n"
+                    f"{verification_link}\n\n"
+                    "This link will expire in 1 hour.\n\n"
+                    "If you did not request this, please ignore this email.\n\n"
+                    "Best regards,\n"
+                    "MallByte Team"
+                ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[new_email],
                 fail_silently=False,
             )
-            print(f"📧 Email sent to {new_email}")
-            
-        except Exception as e:
-            print(f"❌ Failed to send email: {e}")
-            # Fallback: print the verification link to console
-            print(f"\n📧 Email verification link for {new_email}:")
-            print(f"   {verification_link}\n")
-        
-        return Response({
-            'message': 'Verification email sent',
-            'email': new_email
-        }, status=status.HTTP_200_OK)
-        
+
+        except Exception as exc:
+            return Response(
+                {
+                    "error": "Verification email could not be sent.",
+                    "detail": str(exc),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "message": "Verification email sent",
+                "email": new_email,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class EmailVerifyConfirmView(generics.GenericAPIView):
     """Confirm email verification"""
+
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = EmailVerifyConfirmSerializer
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         user = request.user
-        token = serializer.validated_data['token']
-        
-        # if email already verified
+        token = serializer.validated_data["token"]
+
         if user.email_verified:
             return Response(
-                {"error": "Email already verified"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "Email already verified"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # check token
+
         if not verify_email_token(user, token):
             return Response(
-                {"error": "Invalid or expired token"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "Invalid or expired token"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        print(f"Verifying email for user {user.id}: {user.email}")
-        # verfy email
+
         user.email_verified = True
         user.email_verified_at = timezone.now()
-        user.save()
-        print(f"After save: email_verified={user.email_verified}")
-        return Response({
-            'message': 'Email verified successfully'
-        }, status=status.HTTP_200_OK)
+        user.save(
+            update_fields=[
+                "email_verified",
+                "email_verified_at",
+            ]
+        )
+
+        return Response(
+            {
+                "message": "Email verified successfully"
+            },
+            status=status.HTTP_200_OK,
+        )
