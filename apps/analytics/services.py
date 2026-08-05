@@ -1142,3 +1142,458 @@ def get_analytics_alerts(*, limit=10):
             "draft_announcements": draft_announcements.count(),
         },
     }
+    
+def safe_csv_value(value):
+    if value is None:
+        return ""
+
+    value = str(value)
+
+    if value.startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+
+    return value
+
+
+def build_csv_export_data(*, report, period="month", start_date=None, end_date=None):
+    start_at, end_at = get_date_range(
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    if report == "sales":
+        return build_sales_export(start_at, end_at)
+
+    if report == "orders":
+        return build_orders_export(start_at, end_at)
+
+    if report == "payments":
+        return build_payments_export(start_at, end_at)
+
+    if report == "products":
+        return build_products_export()
+
+    if report == "support":
+        return build_support_export(start_at, end_at)
+
+    if report == "returns":
+        return build_returns_export(start_at, end_at)
+
+    if report == "reviews":
+        return build_reviews_export(start_at, end_at)
+
+    return {
+        "filename": "analytics_export.csv",
+        "headers": [],
+        "rows": [],
+    }
+
+
+def build_sales_export(start_at, end_at):
+    payments = Payment.objects.select_related(
+        "order",
+        "user",
+    ).filter(
+        status=Payment.StatusChoices.SUCCESS,
+    )
+
+    payments = filter_by_date_range(
+        payments,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    headers = [
+        "payment_number",
+        "order_number",
+        "customer_id",
+        "customer_phone",
+        "provider",
+        "amount",
+        "currency",
+        "paid_at",
+        "created_at",
+    ]
+
+    rows = [
+        [
+            payment.payment_number,
+            payment.order.order_number,
+            payment.user_id,
+            payment.user.phone,
+            payment.provider,
+            money(payment.amount),
+            payment.currency,
+            payment.paid_at.isoformat() if payment.paid_at else "",
+            payment.created_at.isoformat(),
+        ]
+        for payment in payments.order_by("-created_at")
+    ]
+
+    return {
+        "filename": "analytics_sales_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def build_orders_export(start_at, end_at):
+    orders = Order.objects.select_related("user").all()
+
+    orders = filter_by_date_range(
+        orders,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    headers = [
+        "order_number",
+        "customer_id",
+        "customer_phone",
+        "status",
+        "payment_status",
+        "subtotal",
+        "discount_amount",
+        "shipping_cost",
+        "tax_amount",
+        "total_amount",
+        "city",
+        "paid_at",
+        "cancelled_at",
+        "delivered_at",
+        "created_at",
+    ]
+
+    rows = [
+        [
+            order.order_number,
+            order.user_id,
+            order.user.phone,
+            order.status,
+            order.payment_status,
+            money(order.subtotal),
+            money(order.discount_amount),
+            money(order.shipping_cost),
+            money(order.tax_amount),
+            money(order.total_amount),
+            order.city,
+            order.paid_at.isoformat() if order.paid_at else "",
+            order.cancelled_at.isoformat() if order.cancelled_at else "",
+            order.delivered_at.isoformat() if order.delivered_at else "",
+            order.created_at.isoformat(),
+        ]
+        for order in orders.order_by("-created_at")
+    ]
+
+    return {
+        "filename": "analytics_orders_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def build_payments_export(start_at, end_at):
+    payments = Payment.objects.select_related(
+        "order",
+        "user",
+    ).all()
+
+    payments = filter_by_date_range(
+        payments,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    headers = [
+        "payment_number",
+        "order_number",
+        "customer_id",
+        "customer_phone",
+        "provider",
+        "status",
+        "amount",
+        "currency",
+        "gateway_reference",
+        "failure_reason",
+        "paid_at",
+        "failed_at",
+        "cancelled_at",
+        "refunded_at",
+        "created_at",
+    ]
+
+    rows = [
+        [
+            payment.payment_number,
+            payment.order.order_number,
+            payment.user_id,
+            payment.user.phone,
+            payment.provider,
+            payment.status,
+            money(payment.amount),
+            payment.currency,
+            payment.gateway_reference,
+            payment.failure_reason,
+            payment.paid_at.isoformat() if payment.paid_at else "",
+            payment.failed_at.isoformat() if payment.failed_at else "",
+            payment.cancelled_at.isoformat() if payment.cancelled_at else "",
+            payment.refunded_at.isoformat() if payment.refunded_at else "",
+            payment.created_at.isoformat(),
+        ]
+        for payment in payments.order_by("-created_at")
+    ]
+
+    return {
+        "filename": "analytics_payments_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def build_products_export():
+    products = Product.objects.select_related(
+        "category",
+        "brand",
+        "seller",
+    ).annotate(
+        total_stock_quantity=Sum("stock_items__quantity"),
+        reserved_stock_quantity=Sum("stock_items__reserved_quantity"),
+    )
+
+    headers = [
+        "product_id",
+        "name",
+        "sku",
+        "category",
+        "brand",
+        "seller_id",
+        "status",
+        "is_active",
+        "is_featured",
+        "price",
+        "compare_price",
+        "final_price",
+        "average_rating",
+        "reviews_count",
+        "total_stock",
+        "reserved_stock",
+        "available_stock",
+        "created_at",
+    ]
+
+    rows = []
+
+    for product in products.order_by("-created_at"):
+        total_stock = product.total_stock_quantity or 0
+        reserved_stock = product.reserved_stock_quantity or 0
+        available_stock = total_stock - reserved_stock
+
+        rows.append(
+            [
+                product.id,
+                product.name,
+                product.sku,
+                product.category.name if product.category_id else "",
+                product.brand.name if product.brand_id else "",
+                product.seller_id,
+                product.status,
+                product.is_active,
+                product.is_featured,
+                money(product.price),
+                money(product.compare_price),
+                money(product.final_price),
+                product.avrage_rating,
+                product.reviews_count,
+                total_stock,
+                reserved_stock,
+                available_stock,
+                product.created_at.isoformat(),
+            ]
+        )
+
+    return {
+        "filename": "analytics_products_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def build_support_export(start_at, end_at):
+    tickets = SupportTicket.objects.select_related(
+        "customer",
+        "assigned_to",
+        "order",
+        "product",
+        "return_request",
+    ).all()
+
+    tickets = filter_by_date_range(
+        tickets,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    headers = [
+        "ticket_number",
+        "customer_id",
+        "customer_phone",
+        "assigned_to_id",
+        "subject",
+        "category",
+        "priority",
+        "status",
+        "order_number",
+        "product_id",
+        "return_request_number",
+        "last_message_at",
+        "resolved_at",
+        "closed_at",
+        "created_at",
+    ]
+
+    rows = [
+        [
+            ticket.ticket_number,
+            ticket.customer_id,
+            ticket.customer.phone,
+            ticket.assigned_to_id or "",
+            ticket.subject,
+            ticket.category,
+            ticket.priority,
+            ticket.status,
+            ticket.order.order_number if ticket.order_id else "",
+            ticket.product_id or "",
+            ticket.return_request.request_number if ticket.return_request_id else "",
+            ticket.last_message_at.isoformat() if ticket.last_message_at else "",
+            ticket.resolved_at.isoformat() if ticket.resolved_at else "",
+            ticket.closed_at.isoformat() if ticket.closed_at else "",
+            ticket.created_at.isoformat(),
+        ]
+        for ticket in tickets.order_by("-created_at")
+    ]
+
+    return {
+        "filename": "analytics_support_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def build_returns_export(start_at, end_at):
+    returns = ReturnRequest.objects.select_related(
+        "customer",
+        "order",
+    ).all()
+
+    returns = filter_by_date_range(
+        returns,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    headers = [
+        "request_number",
+        "customer_id",
+        "customer_phone",
+        "order_number",
+        "status",
+        "reason",
+        "requested_resolution",
+        "refund_method",
+        "total_requested_amount",
+        "total_approved_amount",
+        "reviewed_by_id",
+        "reviewed_at",
+        "closed_at",
+        "created_at",
+    ]
+
+    rows = [
+        [
+            return_request.request_number,
+            return_request.customer_id or "",
+            return_request.customer.phone if return_request.customer_id else "",
+            return_request.order.order_number,
+            return_request.status,
+            return_request.reason,
+            return_request.requested_resolution,
+            return_request.refund_method,
+            money(return_request.total_requested_amount),
+            money(return_request.total_approved_amount),
+            return_request.reviewed_by_id or "",
+            return_request.reviewed_at.isoformat() if return_request.reviewed_at else "",
+            return_request.closed_at.isoformat() if return_request.closed_at else "",
+            return_request.created_at.isoformat(),
+        ]
+        for return_request in returns.order_by("-created_at")
+    ]
+
+    return {
+        "filename": "analytics_returns_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+def build_reviews_export(start_at, end_at):
+    reviews = ProductReview.objects.select_related(
+        "customer",
+        "product",
+        "approved_by",
+    ).all()
+
+    reviews = filter_by_date_range(
+        reviews,
+        "created_at",
+        start_at,
+        end_at,
+    )
+
+    headers = [
+        "review_id",
+        "product_id",
+        "product_name",
+        "customer_id",
+        "customer_phone",
+        "rating",
+        "title",
+        "status",
+        "is_verified_purchase",
+        "helpful_count",
+        "not_helpful_count",
+        "approved_by_id",
+        "approved_at",
+        "created_at",
+    ]
+
+    rows = [
+        [
+            review.id,
+            review.product_id,
+            review.product.name,
+            review.customer_id,
+            review.customer.phone,
+            review.rating,
+            review.title,
+            review.status,
+            review.is_verified_purchase,
+            review.helpful_count,
+            review.not_helpful_count,
+            review.approved_by_id or "",
+            review.approved_at.isoformat() if review.approved_at else "",
+            review.created_at.isoformat(),
+        ]
+        for review in reviews.order_by("-created_at")
+    ]
+
+    return {
+        "filename": "analytics_reviews_export.csv",
+        "headers": headers,
+        "rows": rows,
+    }

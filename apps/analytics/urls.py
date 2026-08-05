@@ -3,6 +3,7 @@ from django.urls import path
 from apps.analytics.views import (
     AnalyticsAlertsView,
     AnalyticsBreakdownView,
+    AnalyticsExportView,
     AnalyticsTimeSeriesView,
     DashboardAnalyticsView,
 )
@@ -28,5 +29,10 @@ urlpatterns = [
         "alerts/",
         AnalyticsAlertsView.as_view(),
         name="analytics-alerts",
+    ),
+        path(
+        "export/",
+        AnalyticsExportView.as_view(),
+        name="analytics-export",
     ),
 ]
