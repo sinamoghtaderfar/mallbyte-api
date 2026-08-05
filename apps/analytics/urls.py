@@ -1,5 +1,5 @@
 from django.urls import path
-
+from rest_framework.routers import DefaultRouter
 from apps.analytics.views import (
     AnalyticsAlertsView,
     AnalyticsBreakdownView,
@@ -7,7 +7,11 @@ from apps.analytics.views import (
     AnalyticsTimeSeriesView,
     DashboardAnalyticsView,
 )
-
+from apps.analytics.views import (
+    AnalyticsGeneratedReportViewSet,
+    AnalyticsReportScheduleViewSet,
+    GenerateAnalyticsReportNowView,
+)
 
 urlpatterns = [
     path(
@@ -36,3 +40,22 @@ urlpatterns = [
         name="analytics-export",
     ),
 ]
+
+router = DefaultRouter()
+router.register(
+    "report-schedules",
+    AnalyticsReportScheduleViewSet,
+    basename="analytics-report-schedule",
+)
+router.register(
+    "generated-reports",
+    AnalyticsGeneratedReportViewSet,
+    basename="analytics-generated-report",
+)
+router.register(
+    "generate-report-now",
+    GenerateAnalyticsReportNowView,
+    basename="analytics-generate-report-now",
+)
+
+urlpatterns += router.urls
