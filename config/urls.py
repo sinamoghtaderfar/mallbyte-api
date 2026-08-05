@@ -40,6 +40,7 @@ urlpatterns = [
     path("api/reviews/", include("apps.reviews.urls")),
     path("api/support/", include("apps.support.urls")),
     path("api/content/", include("apps.content.urls")),
+    path("api/analytics/", include("apps.analytics.urls")),
 ]
 
 
