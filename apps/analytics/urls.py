@@ -1,6 +1,7 @@
 from django.urls import path
 
 from apps.analytics.views import (
+    AnalyticsAlertsView,
     AnalyticsBreakdownView,
     AnalyticsTimeSeriesView,
     DashboardAnalyticsView,
@@ -22,5 +23,10 @@ urlpatterns = [
         "breakdown/",
         AnalyticsBreakdownView.as_view(),
         name="analytics-breakdown",
+    ),
+        path(
+        "alerts/",
+        AnalyticsAlertsView.as_view(),
+        name="analytics-alerts",
     ),
 ]

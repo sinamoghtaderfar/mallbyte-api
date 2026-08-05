@@ -886,3 +886,259 @@ def get_analytics_breakdown(*, period="month", start_date=None, end_date=None, l
         "support_by_category": get_support_category_breakdown(start_at, end_at),
         "returns_by_reason": get_return_reason_breakdown(start_at, end_at),
     }
+
+def get_stock_alert_items(queryset):
+    return [
+        {
+            "product_id": stock.product_id,
+            "product_name": stock.product.name,
+            "sku": stock.product.sku,
+            "warehouse_id": stock.warehouse_id,
+            "warehouse_name": stock.warehouse.name,
+            "quantity": stock.quantity,
+            "reserved_quantity": stock.reserved_quantity,
+            "available_quantity": stock.available_units,
+            "low_stock_threshold": stock.low_stock_threshold,
+        }
+        for stock in queryset
+    ]
+
+
+def get_analytics_alerts(*, limit=10):
+    stock_items = Stock.objects.select_related(
+        "product",
+        "warehouse",
+    ).annotate(
+        available_units=F("quantity") - F("reserved_quantity"),
+    )
+
+    low_stock_qs = stock_items.filter(
+        available_units__gt=0,
+        available_units__lte=F("low_stock_threshold"),
+    ).order_by(
+        "available_units",
+        "product__name",
+    )
+
+    out_of_stock_qs = stock_items.filter(
+        available_units__lte=0,
+    ).order_by(
+        "product__name",
+    )
+
+    pending_payment_orders = Order.objects.filter(
+        status=Order.StatusChoices.PENDING_PAYMENT,
+    )
+
+    failed_payments = Payment.objects.filter(
+        status=Payment.StatusChoices.FAILED,
+    )
+
+    pending_reviews = ProductReview.objects.filter(
+        status=ProductReview.StatusChoices.PENDING,
+    )
+
+    urgent_support_tickets = SupportTicket.objects.filter(
+        priority=SupportTicket.PriorityChoices.URGENT,
+        status__in=[
+            SupportTicket.StatusChoices.OPEN,
+            SupportTicket.StatusChoices.PENDING,
+        ],
+    )
+
+    unassigned_support_tickets = SupportTicket.objects.filter(
+        assigned_to__isnull=True,
+        status__in=[
+            SupportTicket.StatusChoices.OPEN,
+            SupportTicket.StatusChoices.PENDING,
+        ],
+    )
+
+    pending_return_statuses = [
+        ReturnRequest.Status.SUBMITTED,
+        ReturnRequest.Status.UNDER_REVIEW,
+        ReturnRequest.Status.WAITING_FOR_ITEM,
+        ReturnRequest.Status.ITEM_RECEIVED,
+        ReturnRequest.Status.INSPECTING,
+        ReturnRequest.Status.REFUND_PENDING,
+    ]
+
+    pending_returns = ReturnRequest.objects.filter(
+        status__in=pending_return_statuses,
+    )
+
+    draft_pages = ContentPage.objects.filter(
+        status=ContentPage.StatusChoices.DRAFT,
+    )
+
+    draft_banners = Banner.objects.filter(
+        status=Banner.StatusChoices.DRAFT,
+    )
+
+    draft_announcements = Announcement.objects.filter(
+        status=Announcement.StatusChoices.DRAFT,
+    )
+
+    out_of_stock_count = out_of_stock_qs.count()
+    low_stock_count = low_stock_qs.count()
+    failed_payments_count = failed_payments.count()
+    pending_payment_orders_count = pending_payment_orders.count()
+    pending_reviews_count = pending_reviews.count()
+    urgent_support_tickets_count = urgent_support_tickets.count()
+    unassigned_support_tickets_count = unassigned_support_tickets.count()
+    pending_returns_count = pending_returns.count()
+    draft_content_count = (
+        draft_pages.count()
+        + draft_banners.count()
+        + draft_announcements.count()
+    )
+
+    return {
+        "generated_at": timezone.now().isoformat(),
+        "cards": [
+            {
+                "key": "out_of_stock_items",
+                "label": "Out of stock items",
+                "value": out_of_stock_count,
+                "severity": "critical" if out_of_stock_count else "ok",
+            },
+            {
+                "key": "low_stock_items",
+                "label": "Low stock items",
+                "value": low_stock_count,
+                "severity": "warning" if low_stock_count else "ok",
+            },
+            {
+                "key": "failed_payments",
+                "label": "Failed payments",
+                "value": failed_payments_count,
+                "severity": "warning" if failed_payments_count else "ok",
+            },
+            {
+                "key": "pending_payment_orders",
+                "label": "Pending payment orders",
+                "value": pending_payment_orders_count,
+                "severity": "warning" if pending_payment_orders_count else "ok",
+            },
+            {
+                "key": "pending_reviews",
+                "label": "Pending reviews",
+                "value": pending_reviews_count,
+                "severity": "info" if pending_reviews_count else "ok",
+            },
+            {
+                "key": "urgent_support_tickets",
+                "label": "Urgent support tickets",
+                "value": urgent_support_tickets_count,
+                "severity": "critical" if urgent_support_tickets_count else "ok",
+            },
+            {
+                "key": "unassigned_support_tickets",
+                "label": "Unassigned support tickets",
+                "value": unassigned_support_tickets_count,
+                "severity": "warning" if unassigned_support_tickets_count else "ok",
+            },
+            {
+                "key": "pending_returns",
+                "label": "Pending return requests",
+                "value": pending_returns_count,
+                "severity": "warning" if pending_returns_count else "ok",
+            },
+            {
+                "key": "draft_content",
+                "label": "Draft content",
+                "value": draft_content_count,
+                "severity": "info" if draft_content_count else "ok",
+            },
+        ],
+        "inventory": {
+            "out_of_stock": get_stock_alert_items(out_of_stock_qs[:limit]),
+            "low_stock": get_stock_alert_items(low_stock_qs[:limit]),
+        },
+        "orders": {
+            "pending_payment_orders": [
+                {
+                    "id": order.id,
+                    "order_number": order.order_number,
+                    "customer_id": order.user_id,
+                    "total_amount": money(order.total_amount),
+                    "created_at": order.created_at.isoformat(),
+                }
+                for order in pending_payment_orders.order_by("-created_at")[:limit]
+            ],
+        },
+        "payments": {
+            "failed_payments": [
+                {
+                    "id": payment.id,
+                    "payment_number": payment.payment_number,
+                    "order_id": payment.order_id,
+                    "amount": money(payment.amount),
+                    "provider": payment.provider,
+                    "failure_reason": payment.failure_reason,
+                    "created_at": payment.created_at.isoformat(),
+                }
+                for payment in failed_payments.order_by("-created_at")[:limit]
+            ],
+        },
+        "reviews": {
+            "pending_reviews": [
+                {
+                    "id": review.id,
+                    "product_id": review.product_id,
+                    "product_name": review.product.name,
+                    "customer_id": review.customer_id,
+                    "rating": review.rating,
+                    "title": review.title,
+                    "created_at": review.created_at.isoformat(),
+                }
+                for review in pending_reviews.select_related("product").order_by("-created_at")[:limit]
+            ],
+        },
+        "support": {
+            "urgent_tickets": [
+                {
+                    "id": ticket.id,
+                    "ticket_number": ticket.ticket_number,
+                    "subject": ticket.subject,
+                    "customer_id": ticket.customer_id,
+                    "priority": ticket.priority,
+                    "status": ticket.status,
+                    "created_at": ticket.created_at.isoformat(),
+                }
+                for ticket in urgent_support_tickets.order_by("-created_at")[:limit]
+            ],
+            "unassigned_tickets": [
+                {
+                    "id": ticket.id,
+                    "ticket_number": ticket.ticket_number,
+                    "subject": ticket.subject,
+                    "customer_id": ticket.customer_id,
+                    "priority": ticket.priority,
+                    "status": ticket.status,
+                    "created_at": ticket.created_at.isoformat(),
+                }
+                for ticket in unassigned_support_tickets.order_by("-created_at")[:limit]
+            ],
+        },
+        "returns": {
+            "pending_returns": [
+                {
+                    "id": return_request.id,
+                    "request_number": return_request.request_number,
+                    "customer_id": return_request.customer_id,
+                    "order_id": return_request.order_id,
+                    "status": return_request.status,
+                    "reason": return_request.reason,
+                    "requested_amount": money(return_request.total_requested_amount),
+                    "created_at": return_request.created_at.isoformat(),
+                }
+                for return_request in pending_returns.order_by("-created_at")[:limit]
+            ],
+        },
+        "content": {
+            "draft_pages": draft_pages.count(),
+            "draft_banners": draft_banners.count(),
+            "draft_announcements": draft_announcements.count(),
+        },
+    }

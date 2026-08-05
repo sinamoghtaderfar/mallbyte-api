@@ -103,3 +103,10 @@ class AnalyticsBreakdownQuerySerializer(serializers.Serializer):
             )
 
         return attrs
+class AnalyticsAlertsQuerySerializer(serializers.Serializer):
+    limit = serializers.IntegerField(
+        required=False,
+        default=10,
+        min_value=1,
+        max_value=50,
+    )
