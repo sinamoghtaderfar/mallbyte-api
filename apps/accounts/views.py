@@ -10,7 +10,15 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .throttles import (
+    AuthIPRateThrottle,
+    OTPEmailRateThrottle,
+    OTPIPRateThrottle,
+    PasswordResetEmailRateThrottle,
+    PasswordResetIPRateThrottle,
+)
 from .models import Address, OTP, Profile, Seller
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
 from .serializers import (
@@ -112,6 +120,7 @@ class OTPRequestView(generics.GenericAPIView):
 
     permission_classes = [permissions.AllowAny]
     serializer_class = OTPRequestSerializer
+    throttle_classes = [OTPIPRateThrottle, OTPEmailRateThrottle]
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -156,6 +165,7 @@ class OTPVerifyView(generics.GenericAPIView):
 
     permission_classes = [permissions.AllowAny]
     serializer_class = OTPVerifySerializer
+    throttle_classes = [OTPIPRateThrottle, OTPEmailRateThrottle]
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -429,6 +439,7 @@ class PasswordResetRequestView(generics.CreateAPIView):
 
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetRequestSerializer
+    throttle_classes = [PasswordResetIPRateThrottle, PasswordResetEmailRateThrottle]
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -473,6 +484,7 @@ class PasswordResetVerifyView(generics.GenericAPIView):
 
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetVerifySerializer
+    throttle_classes = [PasswordResetIPRateThrottle, PasswordResetEmailRateThrottle]
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -754,3 +766,6 @@ class EmailVerifyConfirmView(generics.GenericAPIView):
             },
             status=status.HTTP_200_OK,
         )
+        
+class ThrottledTokenObtainPairView(TokenObtainPairView):
+    throttle_classes = [AuthIPRateThrottle]

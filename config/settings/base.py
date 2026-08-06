@@ -182,6 +182,24 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
+#Reate limit settings for throttling
+REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
+    {
+        "auth_ip": os.getenv("AUTH_IP_THROTTLE_RATE", "100/hour"),
+        "otp_ip": os.getenv("OTP_IP_THROTTLE_RATE", "30/hour"),
+        "otp_email": os.getenv("OTP_EMAIL_THROTTLE_RATE", "10/hour"),
+        "password_reset_ip": os.getenv(
+            "PASSWORD_RESET_IP_THROTTLE_RATE",
+            "20/hour",
+        ),
+        "password_reset_email": os.getenv(
+            "PASSWORD_RESET_EMAIL_THROTTLE_RATE",
+            "10/hour",
+        ),
+    }
+)
 # JWT settings
 
 SIMPLE_JWT = {
@@ -204,8 +222,13 @@ SIMPLE_JWT = {
     "JTI_CLAIM": "jti",
 }
 # CORS settings (for development)
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "False").lower() == "true"
+
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 
 # Email settings
