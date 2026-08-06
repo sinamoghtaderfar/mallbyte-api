@@ -31,7 +31,8 @@ class Cart(models.Model):
         ordering = ["-updated_at"]
 
     def __str__(self):
-        return f"Cart of {self.user.phone}"
+        identifier = self.user.email or self.user.full_name or str(self.user_id)
+        return f"Cart of {identifier}"
 
     @property
     def total_items(self):

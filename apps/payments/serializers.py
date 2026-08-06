@@ -46,7 +46,7 @@ class PaymentListSerializer(serializers.ModelSerializer):
     """
 
     order_number = serializers.ReadOnlyField(source="order.order_number")
-    user_phone = serializers.ReadOnlyField(source="user.phone")
+    user_email = serializers.ReadOnlyField(source="user.email")
 
     provider_display = serializers.CharField(
         source="get_provider_display",
@@ -65,7 +65,7 @@ class PaymentListSerializer(serializers.ModelSerializer):
             "order",
             "order_number",
             "user",
-            "user_phone",
+            "user_email",
             "provider",
             "provider_display",
             "status",
@@ -88,7 +88,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
     """
 
     order_number = serializers.ReadOnlyField(source="order.order_number")
-    user_phone = serializers.ReadOnlyField(source="user.phone")
+    user_email = serializers.ReadOnlyField(source="user.email")
     user_full_name = serializers.ReadOnlyField(source="user.full_name")
 
     provider_display = serializers.CharField(
@@ -110,7 +110,7 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
             "order",
             "order_number",
             "user",
-            "user_phone",
+            "user_email",
             "user_full_name",
             "provider",
             "provider_display",

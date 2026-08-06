@@ -45,7 +45,7 @@ class ShipmentListSerializer(serializers.ModelSerializer):
     """
 
     order_number = serializers.ReadOnlyField(source="order.order_number")
-    user_phone = serializers.ReadOnlyField(source="user.phone")
+    user_email = serializers.ReadOnlyField(source="user.email")
 
     carrier_display = serializers.CharField(
         source="get_carrier_display",
@@ -65,7 +65,7 @@ class ShipmentListSerializer(serializers.ModelSerializer):
             "order",
             "order_number",
             "user",
-            "user_phone",
+            "user_email",
             "carrier",
             "carrier_display",
             "status",
@@ -89,7 +89,7 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
     """
 
     order_number = serializers.ReadOnlyField(source="order.order_number")
-    user_phone = serializers.ReadOnlyField(source="user.phone")
+    user_email = serializers.ReadOnlyField(source="user.email")
     user_full_name = serializers.ReadOnlyField(source="user.full_name")
 
     carrier_display = serializers.CharField(
@@ -112,7 +112,7 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
             "order",
             "order_number",
             "user",
-            "user_phone",
+            "user_email",
             "user_full_name",
             "carrier",
             "carrier_display",

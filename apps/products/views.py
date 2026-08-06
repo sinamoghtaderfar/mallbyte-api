@@ -392,7 +392,6 @@ class ProductExportView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated, IsProductAdmin]
 
     def get(self, request):
-        print(">>> ProductExportView called")
         format_type = request.query_params.get("export_format", "csv")
         products = Product.objects.all()
 

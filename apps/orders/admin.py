@@ -54,7 +54,7 @@ class CartAdmin(admin.ModelAdmin):
 
     list_display = [
         "id",
-        "user_phone",
+        "user_email",
         "user_full_name",
         "total_items",
         "subtotal",
@@ -79,10 +79,10 @@ class CartAdmin(admin.ModelAdmin):
     list_select_related = ["user"]
     inlines = [CartItemInline]
 
-    def user_phone(self, obj):
-        return obj.user.phone
+    def user_email(self, obj):
+        return obj.user.email
 
-    user_phone.short_description = "Phone"
+    user_email.short_description = "Email"
 
     def user_full_name(self, obj):
         return obj.user.full_name
@@ -211,7 +211,7 @@ class OrderAdmin(admin.ModelAdmin):
 
     list_display = [
         "order_number",
-        "user_phone",
+        "user_email",
         "status",
         "payment_status",
         "total_amount",
@@ -320,10 +320,10 @@ class OrderAdmin(admin.ModelAdmin):
         ),
     )
 
-    def user_phone(self, obj):
-        return obj.user.phone
+    def user_email(self, obj):
+        return obj.user.email
 
-    user_phone.short_description = "Customer Phone"
+    user_email.short_description = "Customer Email"
 
     def items_count(self, obj):
         return obj.items.count()

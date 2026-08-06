@@ -1,4 +1,4 @@
-# apps/products/signals.py
+import logging
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -8,6 +8,7 @@ from django.dispatch import receiver
 from .models import Product, RecentlyViewed
 from .utils import generate_product_qr_code
 
+logger = logging.getLogger(__name__)
 
 def add_product_to_recently_viewed(user, product):
     """Add a product to user's recently viewed list."""
@@ -62,7 +63,7 @@ MallByte Team
                 fail_silently=True,
             )
 
-            print(f"Low stock alert sent to {seller_email}")
+            logger.info("Low stock alert sent to %s", seller_email)
 
 
 @receiver(post_save, sender=Product)

@@ -39,7 +39,7 @@ class RequestLogSerializer(serializers.ModelSerializer):
         if not obj.user:
             return None
 
-        return obj.user.full_name or obj.user.email or obj.user.phone
+        return obj.user.full_name or obj.user.email or str(obj.user_id)
 
 
 class ErrorLogSerializer(serializers.ModelSerializer):
@@ -76,7 +76,7 @@ class ErrorLogSerializer(serializers.ModelSerializer):
         if not obj.user:
             return None
 
-        return obj.user.full_name or obj.user.email or obj.user.phone
+        return obj.user.full_name or obj.user.email or str(obj.user_id)
 
     def get_resolved_by_display(self, obj):
         if not obj.resolved_by:

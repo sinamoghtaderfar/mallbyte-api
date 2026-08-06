@@ -1,6 +1,5 @@
 from rest_framework import serializers
 
-from apps.rbac import models
 from .models import (
     Category, Brand, Product, ProductImage, ProductVariant,
     Attribute, AttributeValue, ProductAttribute, RecentlyViewed, Tag, Wishlist, 
@@ -113,7 +112,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 class ProductDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for single product"""
     seller_name = serializers.ReadOnlyField(source='seller.full_name')
-    seller_phone = serializers.ReadOnlyField(source='seller.phone')
+    seller_email = serializers.ReadOnlyField(source="seller.email")
     category_name = serializers.ReadOnlyField(source='category.name')
     brand_name = serializers.ReadOnlyField(source='brand.name')
     brand_logo = serializers.SerializerMethodField()
@@ -134,14 +133,21 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = ['id', 'name', 'slug', 'description', 'short_description',
-                  'price', 'compare_price', 'final_price', 'cost_per_item',
-                  'seller_name', 'seller_phone', 'category', 'category_name',
-                  'brand', 'brand_name', 'brand_logo', 'sku', 'stock','stock', 
-                  'available_stock', 'reserved_stock', 'is_in_stock',
-                  'low_stock_threshold', 'weight', 'length', 'width', 'height',
-                  'status', 'is_active', 'is_featured', 'images', 'variants',
-                  'attributes', 'tags', 'average_rating', 'reviews_count',
-                  'views_count', 'created_at', 'updated_at', 'barcode','labels','label_display',]
+                'price', 'compare_price', 'final_price', 'cost_per_item',
+                "seller_name",
+                "seller_email",
+                "category",
+                "category_name",
+                "brand",
+                "brand_name",
+                "brand_logo",
+                "sku",
+                "stock",
+                'available_stock', 'reserved_stock', 'is_in_stock',
+                'low_stock_threshold', 'weight', 'length', 'width', 'height',
+                'status', 'is_active', 'is_featured', 'images', 'variants',
+                'attributes', 'tags', 'average_rating', 'reviews_count',
+                'views_count', 'created_at', 'updated_at', 'barcode','labels','label_display',]
         read_only_fields = ['id', 'slug', 'views_count', 'created_at', 'updated_at']
     
     def get_attributes(self, obj):
@@ -157,10 +163,10 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_average_rating(self, obj):
-        return 0
+        return obj.avrage_rating
     
     def get_reviews_count(self, obj):
-        return obj.reviews.count()
+        return obj.reviews_count
     
     def get_brand_logo(self, obj):
         if obj.brand and obj.brand.logo:

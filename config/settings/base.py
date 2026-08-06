@@ -132,7 +132,9 @@ if DEBUG:
                 "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
             }
         }
-        print(" Redis not available, using local memory cache")
+
+
+
 ####################
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

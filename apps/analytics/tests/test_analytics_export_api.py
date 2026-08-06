@@ -307,7 +307,7 @@ class AnalyticsExportAPITests(APITestCase):
                 "payment_number",
                 "order_number",
                 "customer_id",
-                "customer_phone",
+                "customer_email",
                 "provider",
                 "amount",
                 "currency",

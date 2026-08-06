@@ -1,7 +1,3 @@
-# apps/products/models.py
-
-from unittest import result
-
 from django.db import models
 from django.utils.text import slugify
 from django.contrib.auth import get_user_model
@@ -212,12 +208,12 @@ class Product(models.Model):
                 counter += 1
             self.slug = slug
         super().save(*args, **kwargs)
-    
+
     @property
     def final_price(self):
-        """Get final price (with discount if any)"""
-        return self.compare_price if self.compare_price else self.price
-    
+        """Current selling price."""
+        return self.price
+
     @property
     def total_stock(self):
         """Total stock across all warehouses."""
@@ -302,6 +298,7 @@ class ProductVariant(models.Model):
     
     @property
     def final_price(self):
+        """Get final price (with discount if any)"""
         return self.compare_price if self.compare_price else self.price
 
 
@@ -417,6 +414,7 @@ class RecentlyViewed(models.Model):
         unique_together = ['user', 'product']
         
     def __str__(self):
-        return f"{self.user.phone} viewed {self.product.name}"
+        identifier = self.user.email or self.user.full_name or str(self.user_id)
+        return f"{identifier} viewed {self.product.name}"
     
     
