@@ -34,3 +34,8 @@ venv/
 __pycache__/
 *.pyc
 .env
+
+# Generated export files
+*_export.csv
+*_export.xlsx
+media/
