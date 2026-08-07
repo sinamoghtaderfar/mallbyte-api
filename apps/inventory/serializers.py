@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.inventory.models import Warehouse, Stock, StockMovement, StockTransfer
+from apps.inventory.models import Stock, StockMovement, StockTransfer, Warehouse
 from apps.products.models import Product
 
 
@@ -397,10 +397,10 @@ class StockReserveSerializer(serializers.Serializer):
 
         try:
             stock = Stock.objects.get(product=product, warehouse=warehouse)
-        except Stock.DoesNotExist:
+        except Stock.DoesNotExist as exc:
             raise serializers.ValidationError(
                 "Stock record does not exist for this product and warehouse."
-            )
+            ) from exc
 
         if stock.available_quantity < quantity:
             raise serializers.ValidationError("Not enough available stock to reserve.")
@@ -423,10 +423,10 @@ class StockReleaseReservationSerializer(serializers.Serializer):
 
         try:
             stock = Stock.objects.get(product=product, warehouse=warehouse)
-        except Stock.DoesNotExist:
+        except Stock.DoesNotExist as exc:
             raise serializers.ValidationError(
                 "Stock record does not exist for this product and warehouse."
-            )
+            ) from exc
 
         if stock.reserved_quantity < quantity:
             raise serializers.ValidationError(

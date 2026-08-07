@@ -3,7 +3,6 @@ from rest_framework import serializers
 
 from .models import AdminLog, Permission, Role, RolePermission, UserRole
 
-
 User = get_user_model()
 
 

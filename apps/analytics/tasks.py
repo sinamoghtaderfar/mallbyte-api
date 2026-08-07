@@ -1,6 +1,5 @@
 import csv
 import io
-from datetime import timedelta
 
 from celery import shared_task
 from django.core.files.base import ContentFile

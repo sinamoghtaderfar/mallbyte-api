@@ -3,8 +3,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from apps.accounts.models import Address, OTP, Profile, User
-
+from apps.accounts.models import OTP, Address, Profile, User
 
 # ============================================================
 # User Inlines

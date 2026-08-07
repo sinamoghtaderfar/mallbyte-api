@@ -7,6 +7,7 @@ from apps.analytics.models import (
     AnalyticsReportType,
 )
 
+
 class DashboardQuerySerializer(serializers.Serializer):
     PERIOD_CHOICES = [
         ("today", "Today"),

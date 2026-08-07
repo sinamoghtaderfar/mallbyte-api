@@ -28,6 +28,7 @@ from apps.support.serializers import (
     TicketTagSerializer,
 )
 
+
 class SupportTagViewSet(viewsets.ModelViewSet):
     serializer_class = SupportTagSerializer
     queryset = SupportTag.objects.all().order_by("name")

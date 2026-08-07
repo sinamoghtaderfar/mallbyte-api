@@ -3,7 +3,6 @@ from rest_framework import serializers
 from apps.orders.models import Order
 from apps.payments.models import Payment, PaymentEvent
 
-
 # ============================================================
 # Payment Event Serializer
 # ============================================================

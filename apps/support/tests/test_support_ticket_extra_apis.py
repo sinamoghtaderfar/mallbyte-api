@@ -17,7 +17,6 @@ from apps.support.models import (
     TicketMessage,
 )
 
-
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
 
 

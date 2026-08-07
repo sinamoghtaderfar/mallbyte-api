@@ -1,8 +1,9 @@
-import qrcode
 from io import BytesIO
-from django.core.files.base import ContentFile
+
+import qrcode
 from django.conf import settings
-import os
+from django.core.files.base import ContentFile
+
 
 def generate_product_qr_code(product):
     if not product.slug:

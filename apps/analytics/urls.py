@@ -1,15 +1,14 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
+
 from apps.analytics.views import (
     AnalyticsAlertsView,
     AnalyticsBreakdownView,
     AnalyticsExportView,
-    AnalyticsTimeSeriesView,
-    DashboardAnalyticsView,
-)
-from apps.analytics.views import (
     AnalyticsGeneratedReportViewSet,
     AnalyticsReportScheduleViewSet,
+    AnalyticsTimeSeriesView,
+    DashboardAnalyticsView,
     GenerateAnalyticsReportNowView,
 )
 

@@ -126,7 +126,7 @@ if DEBUG:
 
         r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
         r.ping()
-    except:
+    except Exception:
         CACHES = {
             "default": {
                 "BACKEND": "django.core.cache.backends.locmem.LocMemCache",

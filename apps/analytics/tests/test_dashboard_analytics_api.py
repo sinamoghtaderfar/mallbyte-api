@@ -8,7 +8,6 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
-from apps import analytics
 from apps.accounts.models import User
 from apps.content.models import Announcement, Banner, ContentPage, FAQCategory, FAQItem
 from apps.inventory.models import Stock, Warehouse

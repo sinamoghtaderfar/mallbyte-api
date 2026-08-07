@@ -18,7 +18,6 @@ from apps.content.models import (
     FAQItem,
 )
 
-
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
 
 

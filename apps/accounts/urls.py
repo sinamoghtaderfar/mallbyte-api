@@ -7,8 +7,8 @@ from .views import (
     AdminPendingSellersView,
     AdminSellerDetailView,
     AdminSellerRejectView,
-    AdminSellerVerifyView,
     AdminSellersListView,
+    AdminSellerVerifyView,
     ChangePasswordView,
     DeleteAccountView,
     EmailVerifyConfirmView,
@@ -24,7 +24,6 @@ from .views import (
     SellerStatusView,
     SellerStoreView,
 )
-
 
 router = DefaultRouter()
 router.register("addresses", AddressViewSet, basename="address")

@@ -3,7 +3,7 @@
 from django.db.models import F, Q
 from django_filters import rest_framework as filters
 
-from .models import Product, Category, Brand
+from .models import Brand, Category, Product
 
 
 class ProductFilter(filters.FilterSet):

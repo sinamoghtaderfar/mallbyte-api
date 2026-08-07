@@ -962,25 +962,6 @@ class NotificationAPITests(APITestCase):
         self.assertTrue(data["push_enabled"])
         self.assertTrue(data["in_app_enabled"])
 
-    def test_user_can_get_notification_preferences(self):
-        self.get_api_client().force_authenticate(user=self.user)
-
-        url = reverse("notification-preferences")
-
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        data = response.json()
-
-        self.assertEqual(data["user"], str(self.user))
-        self.assertEqual(data["muted_notification_types"], [])
-        self.assertEqual(data["muted_channels"], [])
-        self.assertTrue(data["email_enabled"])
-        self.assertTrue(data["sms_enabled"])
-        self.assertTrue(data["push_enabled"])
-        self.assertTrue(data["in_app_enabled"])
-
     def test_user_can_update_notification_preferences(self):
         self.get_api_client().force_authenticate(user=self.user)
 

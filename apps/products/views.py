@@ -503,7 +503,7 @@ class BulkProductUploadView(generics.CreateAPIView):
 
         for index, row in df.iterrows():
             try:
-                product = Product.objects.create(
+                Product.objects.create(
                     seller=request.user,
                     name=row["name"],
                     description=row.get("description", ""),

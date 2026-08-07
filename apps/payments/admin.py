@@ -4,7 +4,6 @@ from django.contrib import admin
 
 from apps.payments.models import Payment, PaymentEvent
 
-
 # ============================================================
 # Payment Events inside Payment page
 # ============================================================

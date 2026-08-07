@@ -1,9 +1,18 @@
 from rest_framework import serializers
 
 from .models import (
-    Category, Brand, Product, ProductImage, ProductVariant,
-    Attribute, AttributeValue, ProductAttribute, RecentlyViewed, Tag, Wishlist, 
+    Attribute,
+    AttributeValue,
+    Brand,
+    Category,
+    Product,
+    ProductImage,
+    ProductVariant,
+    RecentlyViewed,
+    Tag,
+    Wishlist,
 )
+
 
 class CategorySerializer(serializers.ModelSerializer):
     """Serializer for Category model"""

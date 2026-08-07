@@ -3,7 +3,6 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.support.notifications import create_support_notification
 from apps.support.models import (
     SupportTag,
     SupportTicket,
@@ -11,6 +10,7 @@ from apps.support.models import (
     TicketAuditLog,
     TicketMessage,
 )
+from apps.support.notifications import create_support_notification
 
 User = get_user_model()
 

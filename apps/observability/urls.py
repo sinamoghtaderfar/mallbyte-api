@@ -12,7 +12,6 @@ from apps.observability.views import (
     SystemHealthSnapshotViewSet,
 )
 
-
 router = DefaultRouter()
 router.register(
     "request-logs",

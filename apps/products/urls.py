@@ -1,13 +1,9 @@
 # apps/products/urls.py
 
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import (
-    BulkProductUploadView, CategoryViewSet, BrandViewSet, ProductComparisonView, ProductExportView, ProductQRCodeView, ProductViewSet,
-    AttributeViewSet, AttributeValueViewSet, TagViewSet,
-    ProductImageViewSet, ProductVariantViewSet, WishlistViewSet, RecentlyViewedViewSet,ProductLabelsView
-)
+from .views import AttributeValueViewSet, AttributeViewSet, BrandViewSet, BulkProductUploadView, CategoryViewSet, ProductComparisonView, ProductExportView, ProductImageViewSet, ProductLabelsView, ProductQRCodeView, ProductVariantViewSet, ProductViewSet, RecentlyViewedViewSet, TagViewSet, WishlistViewSet
 
 router = DefaultRouter()
 router.register('categories', CategoryViewSet)

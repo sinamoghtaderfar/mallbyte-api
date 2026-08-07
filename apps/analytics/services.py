@@ -1,10 +1,10 @@
 from datetime import datetime, time, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.contrib.auth import get_user_model
 from django.db.models import Avg, Count, F, Q, Sum
-from django.utils import timezone
 from django.db.models.functions import TruncDate
+from django.utils import timezone
 
 from apps.content.models import Announcement, Banner, ContentPage, FAQItem
 from apps.inventory.models import Stock
@@ -14,7 +14,6 @@ from apps.products.models import Product
 from apps.returns.models import ReturnRequest
 from apps.reviews.models import ProductReview
 from apps.support.models import SupportTicket
-
 
 User = get_user_model()
 

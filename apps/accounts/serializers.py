@@ -1,10 +1,10 @@
 import re
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from .models import Address, Profile, Seller
-
 
 User = get_user_model()
 
@@ -232,11 +232,6 @@ class SellerUpdateSerializer(serializers.ModelSerializer):
             'business_email', 'website', 'bank_info'
         ]
 
-class AdminSellerActionSerializer(serializers.Serializer):
-    """Serializer for admin actions on sellers"""
-    
-    reason = serializers.CharField(required=False, allow_blank=True)
-    
 class AdminSellerActionSerializer(serializers.Serializer):
     """
     Serializer for admin actions on sellers.

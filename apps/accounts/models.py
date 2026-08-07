@@ -1,10 +1,8 @@
-from email import message
 import random
 from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.contrib.messages.api import success
 from django.db import models
 from django.utils import timezone
 
@@ -57,7 +55,7 @@ class UserManager(BaseUserManager):
 
 class User(AbstractUser):
     """
-    Custom User model - login using phone number
+    Custom user model using email as the primary login identifier
     """
 
     # Remove the default username field
@@ -192,7 +190,7 @@ class Address(models.Model):
 
 
 class OTP(models.Model):
-    """One-time password for phone verification"""
+    """One-time password for email verification"""
 
     phone = models.CharField(
     max_length=15,

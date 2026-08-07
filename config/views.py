@@ -16,7 +16,7 @@ def api_home(request):
                 "products": "/api/products/",
                 "health": "/api/observability/health/",
                 "schema": "/api/schema/",
-                "docs": "/api/docs/",
+                "docs": "/swagger/",
             },
         }
     )

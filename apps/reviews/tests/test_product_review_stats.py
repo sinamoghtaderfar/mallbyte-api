@@ -131,7 +131,7 @@ class ProductReviewStatsTests(APITestCase):
         self.assertEqual(self.product.avrage_rating, Decimal("5.00"))
 
     def test_product_review_stats_use_only_approved_reviews(self):
-        approved_review = self.create_review(
+        self.create_review(
             customer=self.customer,
             rating=5,
             status_choice=ProductReview.StatusChoices.APPROVED,
@@ -163,7 +163,7 @@ class ProductReviewStatsTests(APITestCase):
             status_choice=ProductReview.StatusChoices.APPROVED,
         )
 
-        other_review = self.create_review(
+        self.create_review(
             customer=self.other_customer,
             rating=3,
             status_choice=ProductReview.StatusChoices.APPROVED,
@@ -205,7 +205,7 @@ class ProductReviewStatsTests(APITestCase):
             status_choice=ProductReview.StatusChoices.APPROVED,
         )
 
-        other_review = self.create_review(
+        self.create_review(
             customer=self.other_customer,
             rating=4,
             status_choice=ProductReview.StatusChoices.APPROVED,

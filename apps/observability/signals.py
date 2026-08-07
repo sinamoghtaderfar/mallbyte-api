@@ -1,8 +1,7 @@
-from django.utils import timezone
 from celery.signals import task_postrun, task_prerun
+from django.utils import timezone
 
 from apps.observability.models import CeleryTaskLog
-
 
 STATUS_MAP = {
     "SUCCESS": CeleryTaskLog.StatusChoices.SUCCESS,

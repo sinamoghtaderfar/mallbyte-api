@@ -36,8 +36,8 @@ class Command(BaseCommand):
 
             try:
                 user = User.objects.get(pk=user_id)
-            except User.DoesNotExist:
-                raise CommandError(f"User with id {user_id} does not exist.")
+            except User.DoesNotExist as exc:
+                raise CommandError(f"User with id {user_id} does not exist.") from exc
 
         deleted_count = delete_old_read_notifications(
             days=days,

@@ -15,7 +15,6 @@ from .views import (
     UserRoleViewSet,
 )
 
-
 router = DefaultRouter()
 router.register("roles", RoleViewSet, basename="role")
 router.register("permissions", PermissionViewSet, basename="permission")

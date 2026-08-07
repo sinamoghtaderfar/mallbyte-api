@@ -7,8 +7,9 @@ from django.db import models, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.products.models import Product
 from apps.inventory.models import Stock, Warehouse
+from apps.products.models import Product
+
 
 class Cart(models.Model):
     """

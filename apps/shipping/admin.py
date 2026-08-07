@@ -7,7 +7,6 @@ from django.utils.html import format_html
 
 from apps.shipping.models import Shipment, ShipmentEvent
 
-
 # ============================================================
 # Shared Helpers
 # ============================================================

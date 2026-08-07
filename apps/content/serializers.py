@@ -10,6 +10,7 @@ from apps.content.models import (
     NavigationMenu,
 )
 
+
 class ContentPageSerializer(serializers.ModelSerializer):
     created_by_display = serializers.CharField(
         source="created_by.full_name",

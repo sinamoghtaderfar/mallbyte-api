@@ -1,5 +1,7 @@
 from rest_framework import permissions
+
 from apps.rbac.utils import has_permission
+
 
 class IsAdminOrVendorManager(permissions.BasePermission):
     """

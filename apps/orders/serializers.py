@@ -377,8 +377,8 @@ class CheckoutSerializer(serializers.Serializer):
 
         try:
             cart = user.cart
-        except Cart.DoesNotExist:
-            raise serializers.ValidationError("Cart does not exist.")
+        except Cart.DoesNotExist as exc:
+            raise serializers.ValidationError("Cart does not exist.") from exc
 
         if not cart.items.exists():
             raise serializers.ValidationError("Cart is empty.")
@@ -406,7 +406,7 @@ class CheckoutSerializer(serializers.Serializer):
                     {
                         "discount_code": message,
                     }
-                )
+                ) from exc
 
             attrs["discount"] = discount
             attrs["discount_amount"] = discount_amount

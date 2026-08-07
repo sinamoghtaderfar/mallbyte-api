@@ -1,23 +1,27 @@
 import csv
 
-from django.http import HttpResponse,FileResponse
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from apps.analytics.models import (
+    AnalyticsGeneratedReport,
+    AnalyticsReportSchedule,
+)
 from apps.analytics.permissions import IsAnalyticsAdmin
 from apps.analytics.serializers import (
     AnalyticsAlertsQuerySerializer,
     AnalyticsBreakdownQuerySerializer,
     AnalyticsExportQuerySerializer,
-    DashboardQuerySerializer,
-    TimeSeriesQuerySerializer,
     AnalyticsGeneratedReportSerializer,
     AnalyticsReportScheduleSerializer,
+    DashboardQuerySerializer,
     GenerateAnalyticsReportNowSerializer,
+    TimeSeriesQuerySerializer,
 )
 from apps.analytics.services import (
     build_csv_export_data,
@@ -27,16 +31,11 @@ from apps.analytics.services import (
     get_dashboard_analytics,
     safe_csv_value,
 )
-
-from apps.analytics.models import (
-    AnalyticsGeneratedReport,
-    AnalyticsReportSchedule,
-)
-
 from apps.analytics.tasks import (
     create_reports_for_schedule,
     generate_analytics_report,
 )
+
 
 class DashboardAnalyticsView(APIView):
     permission_classes = [

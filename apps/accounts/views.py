@@ -3,27 +3,17 @@ from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.http import Http404
 from django.utils import timezone
-
 from rest_framework import generics, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
-
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .throttles import (
-    AuthIPRateThrottle,
-    OTPEmailRateThrottle,
-    OTPIPRateThrottle,
-    PasswordResetEmailRateThrottle,
-    PasswordResetIPRateThrottle,
-)
-from .models import Address, OTP, Profile, Seller
+from .models import OTP, Address, Profile, Seller
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
 from .serializers import (
     AddressSerializer,
-    AdminSellerActionSerializer,
     ChangePasswordSerializer,
     DeleteAccountSerializer,
     EmailVerifyConfirmSerializer,
@@ -39,8 +29,14 @@ from .serializers import (
     SellerUpdateSerializer,
     UserSerializer,
 )
+from .throttles import (
+    AuthIPRateThrottle,
+    OTPEmailRateThrottle,
+    OTPIPRateThrottle,
+    PasswordResetEmailRateThrottle,
+    PasswordResetIPRateThrottle,
+)
 from .utils import generate_email_verification_token, verify_email_token
-
 
 User = get_user_model()
 
@@ -256,8 +252,8 @@ class SellerStatusView(generics.RetrieveAPIView):
         try:
             return self.request.user.seller
 
-        except Seller.DoesNotExist:
-            raise Http404("No seller profile found")
+        except Seller.DoesNotExist as exc:
+            raise Http404("No seller profile found") from exc
 
 
 class IsSellerPermission(permissions.BasePermission):

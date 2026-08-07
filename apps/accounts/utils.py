@@ -1,6 +1,5 @@
 import secrets
-from django.utils import timezone
-from datetime import timedelta
+
 
 def generate_email_verification_token(user):
     """Generate a simple token for email verification"""

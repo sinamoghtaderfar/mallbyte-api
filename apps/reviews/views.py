@@ -9,7 +9,9 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 
-from apps.reviews.models import ProductReview
+from apps.products.models import Product
+from apps.reviews.models import ProductReview, ProductReviewVote
+from apps.reviews.notifications import create_review_notification
 from apps.reviews.permissions import IsReviewOwnerOrAdminOrReadOnly
 from apps.reviews.serializers import (
     ProductReviewModerationSerializer,
@@ -20,9 +22,7 @@ from apps.reviews.services import (
     set_review_vote,
     update_product_review_stats,
 )
-from apps.reviews.notifications import create_review_notification
-from apps.reviews.models import ProductReview, ProductReviewVote
-from apps.products.models import Product
+
 
 class ProductReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ProductReviewSerializer
@@ -254,12 +254,6 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    def perform_destroy(self, instance):
-        product = instance.product
-        instance.delete()
-        update_product_review_stats(product)
-        
-        
     def perform_destroy(self, instance):
         product = instance.product
         instance.delete()

@@ -8,7 +8,6 @@ from apps.content.views import (
     FAQCategoryViewSet,
     FAQItemViewSet,
     HomepageContentView,
-    HomepageContentView,
     NavigationMenuViewSet,
 )
 

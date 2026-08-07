@@ -4,9 +4,9 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenRefreshView
-from config.views import api_home
-from apps.accounts.views import ThrottledTokenObtainPairView
 
+from apps.accounts.views import ThrottledTokenObtainPairView
+from config.views import api_home
 
 urlpatterns = [
     path("", api_home, name="api_home"),

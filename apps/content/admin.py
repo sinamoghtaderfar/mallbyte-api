@@ -10,6 +10,7 @@ from apps.content.models import (
     NavigationMenu,
 )
 
+
 @admin.register(ContentPage)
 class ContentPageAdmin(admin.ModelAdmin):
     list_display = (

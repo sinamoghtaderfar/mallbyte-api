@@ -17,7 +17,6 @@ from apps.returns.models import ReturnRequest
 from apps.reviews.models import ProductReview
 from apps.support.models import SupportTicket
 
-
 DEMO_PASSWORD = "DemoPass123!"
 
 

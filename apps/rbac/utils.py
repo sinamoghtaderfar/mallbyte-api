@@ -1,6 +1,5 @@
 from django.core.cache import cache
 
-
 PERMISSION_CACHE_TIMEOUT = 3600
 
 

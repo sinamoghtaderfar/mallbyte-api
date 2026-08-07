@@ -26,7 +26,6 @@ from apps.orders.models import Order, OrderItem
 from apps.payments.models import Payment
 from apps.products.models import Category, Product
 
-
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
 
 

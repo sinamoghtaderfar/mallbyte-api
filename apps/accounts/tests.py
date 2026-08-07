@@ -4,15 +4,13 @@ from unittest.mock import patch
 from django.core import mail
 from django.core.cache import cache
 from django.test import override_settings
-from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import Address, OTP, Profile, Seller, User
+from apps.accounts.models import OTP, Address, Profile, Seller, User
 from apps.accounts.otp_delivery import mask_email, normalize_email, send_otp_email
 from apps.accounts.utils import generate_email_verification_token
-
 
 EMAIL_TEST_SETTINGS = {
     "EMAIL_BACKEND": "django.core.mail.backends.locmem.EmailBackend",
