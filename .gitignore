@@ -39,3 +39,6 @@ __pycache__/
 *_export.csv
 *_export.xlsx
 media/
+
+# Docker local environment
+.env.docker

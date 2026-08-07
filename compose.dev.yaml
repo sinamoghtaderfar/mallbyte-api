@@ -1,0 +1,66 @@
+services:
+  web:
+    container_name: mallbyte_web
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: 1000
+        APP_GID: 1000
+    container_name: mallbyte_celery_worker
+    env_file:
+      - .env.docker
+    command: celery -A config worker -l info
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mallbyte_backend
+    profiles:
+      - celery
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: 1000
+        APP_GID: 1000
+    container_name: mallbyte_celery_beat
+    env_file:
+      - .env.docker
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mallbyte_backend
+    profiles:
+      - celery
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mallbyte_mailpit
+    ports:
+      - "8025:8025"
+    networks:
+      - mallbyte_backend
+    profiles:
+      - tools
