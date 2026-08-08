@@ -10,24 +10,45 @@ This repository contains the backend API only. A web or mobile frontend can be d
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
-- [Core Features](#core-features)
-- [Tech Stack](#tech-stack)
-- [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Getting Started with Docker](#getting-started-with-docker)
-- [Environment Configuration](#environment-configuration)
-- [Email OTP Authentication](#email-otp-authentication)
-- [API Documentation](#api-documentation)
-- [API Modules](#api-modules)
-- [Development Workflow](#development-workflow)
-- [Testing](#testing)
-- [Celery and Background Jobs](#celery-and-background-jobs)
-- [Local Email Testing](#local-email-testing)
-- [Database](#database)
-- [Security Notes](#security-notes)
-- [Production Deployment Notes](#production-deployment-notes)
-- [Current Status](#current-status)
+- [MallByte API](#mallbyte-api)
+  - [Table of Contents](#table-of-contents)
+  - [Project Overview](#project-overview)
+  - [Project Documentation](#project-documentation)
+  - [Core Features](#core-features)
+    - [Authentication and Accounts](#authentication-and-accounts)
+    - [Authorization and Admin Control](#authorization-and-admin-control)
+    - [Commerce Modules](#commerce-modules)
+    - [Customer Experience Modules](#customer-experience-modules)
+    - [Platform Operations](#platform-operations)
+  - [Tech Stack](#tech-stack)
+  - [Architecture](#architecture)
+  - [Project Structure](#project-structure)
+  - [Getting Started with Docker](#getting-started-with-docker)
+    - [Requirements](#requirements)
+    - [Clone the Repository](#clone-the-repository)
+    - [Create the Docker Environment File](#create-the-docker-environment-file)
+    - [Build the Containers](#build-the-containers)
+    - [Start the Development Server](#start-the-development-server)
+  - [Environment Configuration](#environment-configuration)
+  - [Email OTP Authentication](#email-otp-authentication)
+    - [Request OTP](#request-otp)
+    - [Verify OTP](#verify-otp)
+  - [Real Email Delivery with Brevo SMTP](#real-email-delivery-with-brevo-smtp)
+  - [API Documentation](#api-documentation)
+  - [API Modules](#api-modules)
+  - [Development Workflow](#development-workflow)
+    - [Common Local Workflow](#common-local-workflow)
+  - [Testing](#testing)
+  - [Celery and Background Jobs](#celery-and-background-jobs)
+  - [Local Email Testing](#local-email-testing)
+    - [1. Console Email Backend](#1-console-email-backend)
+    - [2. Mailpit](#2-mailpit)
+    - [3. Brevo SMTP](#3-brevo-smtp)
+  - [Database](#database)
+  - [Security Notes](#security-notes)
+  - [Production Deployment Notes](#production-deployment-notes)
+  - [Current Status](#current-status)
+  - [License](#license)
 
 ---
 
@@ -48,12 +69,20 @@ The backend is split into separate Django apps to keep business domains isolated
 
 ---
 
+## Project Documentation
+
+A more detailed backend case study is available here:
+
+[Detailed Backend Documentation](https://petite-pheasant-cb4.notion.site/MallByte-Backend-API-Project-Case-Study-3b673a96044080c085e4d3b46b806a9a)
+
+---
+
 ## Core Features
 
 ### Authentication and Accounts
 
 - Email-based user authentication
-- OTP login and registration flow
+- OTP-based login and registration flow
 - JWT access and refresh tokens
 - Optional phone number as profile/contact information
 - Email verification status
@@ -424,23 +453,23 @@ The root endpoint returns service metadata and useful API links.
 
 The backend exposes the following top-level API groups:
 
-| Module | Base Path | Purpose |
-| --- | --- | --- |
-| Authentication | `/api/auth/` | OTP, account, login, profile, password reset, seller application |
-| RBAC | `/api/rbac/` | roles, permissions, and user role assignments |
-| Products | `/api/products/` | product catalog and product-related operations |
-| Inventory | `/api/inventory/` | stock and inventory management |
-| Orders | `/api/orders/` | carts, checkout, and orders |
-| Payments | `/api/payments/` | payment-related APIs |
-| Shipping | `/api/shipping/` | shipping addresses and shipping operations |
-| Discounts | `/api/discounts/` | discounts and promotional rules |
-| Returns | `/api/returns/` | return management |
-| Notifications | `/api/notifications/` | user notifications and preferences |
-| Reviews | `/api/reviews/` | product reviews and review votes |
-| Support | `/api/support/` | support tickets, tags, attachments, and audit history |
-| Content | `/api/content/` | platform content and navigation |
-| Analytics | `/api/analytics/` | dashboards, reports, alerts, and scheduled reports |
-| Observability | `/api/observability/` | health checks, logs, audit records, alerts, and task logs |
+| Module         | Base Path             | Purpose                                                          |
+| -------------- | --------------------- | ---------------------------------------------------------------- |
+| Authentication | `/api/auth/`          | OTP, account, login, profile, password reset, seller application |
+| RBAC           | `/api/rbac/`          | roles, permissions, and user role assignments                    |
+| Products       | `/api/products/`      | product catalog and product-related operations                   |
+| Inventory      | `/api/inventory/`     | stock and inventory management                                   |
+| Orders         | `/api/orders/`        | carts, checkout, and orders                                      |
+| Payments       | `/api/payments/`      | payment-related APIs                                             |
+| Shipping       | `/api/shipping/`      | shipping addresses and shipping operations                       |
+| Discounts      | `/api/discounts/`     | discounts and promotional rules                                  |
+| Returns        | `/api/returns/`       | return management                                                |
+| Notifications  | `/api/notifications/` | user notifications and preferences                               |
+| Reviews        | `/api/reviews/`       | product reviews and review votes                                 |
+| Support        | `/api/support/`       | support tickets, tags, attachments, and audit history            |
+| Content        | `/api/content/`       | platform content and navigation                                  |
+| Analytics      | `/api/analytics/`     | dashboards, reports, alerts, and scheduled reports               |
+| Observability  | `/api/observability/` | health checks, logs, audit records, alerts, and task logs        |
 
 ---
 
