@@ -711,4 +711,4 @@ The frontend is not included in this repository. It should be developed as a sep
 
 ## License
 
-No license has been added yet.
+This project is licensed under the [MIT License](LICENSE).
