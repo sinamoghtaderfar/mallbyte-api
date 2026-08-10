@@ -23,6 +23,7 @@ from .views import (
     SellerDashboardView,
     SellerStatusView,
     SellerStoreView,
+    LogoutView
 )
 
 router = DefaultRouter()
@@ -30,6 +31,7 @@ router.register("addresses", AddressViewSet, basename="address")
 
 
 urlpatterns = [
+    path("logout/", LogoutView.as_view(), name="logout"),
 
     # OTP endpoints
     path("otp/request/", OTPRequestView.as_view(), name="otp_request"),

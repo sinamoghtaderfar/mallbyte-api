@@ -3,9 +3,8 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from rest_framework_simplejwt.views import TokenRefreshView
 
-from apps.accounts.views import ThrottledTokenObtainPairView
+from apps.accounts.views import ThrottledTokenObtainPairView, CookieTokenRefreshView
 from config.views import api_home
 
 urlpatterns = [
@@ -20,7 +19,7 @@ urlpatterns = [
     ),
     path(
         "api/auth/token/refresh/",
-        TokenRefreshView.as_view(),
+        CookieTokenRefreshView.as_view(),
         name="token_refresh",
     ),
 

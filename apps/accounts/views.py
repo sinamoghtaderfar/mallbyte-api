@@ -7,8 +7,15 @@ from rest_framework import generics, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
+
+from apps.accounts.cookies import (
+    clear_refresh_cookie,
+    get_refresh_cookie_name,
+    set_refresh_cookie,
+)
 
 from .models import OTP, Address, Profile, Seller
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
@@ -42,7 +49,7 @@ User = get_user_model()
 
 
 class RegisterView(generics.CreateAPIView):
-    """Register a new user"""
+    """Register a new user."""
 
     queryset = User.objects.all()
     permission_classes = [permissions.AllowAny]
@@ -53,21 +60,21 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         user = serializer.save()
-
         refresh = RefreshToken.for_user(user)
 
-        return Response(
+        response = Response(
             {
                 "user": UserSerializer(user).data,
-                "refresh": str(refresh),
                 "access": str(refresh.access_token),
             },
             status=status.HTTP_201_CREATED,
         )
+        set_refresh_cookie(response, str(refresh))
+        return response
 
 
 class ProfileView(generics.RetrieveUpdateAPIView):
-    """Show and edit the authenticated user's profile"""
+    """Show and edit the authenticated user's profile."""
 
     serializer_class = ProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -78,7 +85,7 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
 
 class AddressViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing user addresses"""
+    """ViewSet for managing user addresses."""
 
     serializer_class = AddressSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -105,14 +112,14 @@ class AddressViewSet(viewsets.ModelViewSet):
 
         return Response(
             {
-                "status": "default address set"
+                "status": "default address set",
             },
             status=status.HTTP_200_OK,
         )
 
 
 class OTPRequestView(generics.GenericAPIView):
-    """Request email OTP code"""
+    """Request email OTP code."""
 
     permission_classes = [permissions.AllowAny]
     serializer_class = OTPRequestSerializer
@@ -123,7 +130,6 @@ class OTPRequestView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
 
         email = serializer.validated_data["email"]
-
         otp = OTP.generate_otp(email=email)
 
         try:
@@ -157,7 +163,7 @@ class OTPRequestView(generics.GenericAPIView):
 
 
 class OTPVerifyView(generics.GenericAPIView):
-    """Verify email OTP and login/register user"""
+    """Verify email OTP and login/register user."""
 
     permission_classes = [permissions.AllowAny]
     serializer_class = OTPVerifySerializer
@@ -178,7 +184,7 @@ class OTPVerifyView(generics.GenericAPIView):
         if not success:
             return Response(
                 {
-                    "error": message
+                    "error": message,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -214,19 +220,20 @@ class OTPVerifyView(generics.GenericAPIView):
 
         refresh = RefreshToken.for_user(user)
 
-        return Response(
+        response = Response(
             {
                 "user": UserSerializer(user).data,
-                "refresh": str(refresh),
                 "access": str(refresh.access_token),
                 "is_new": created,
             },
             status=status.HTTP_200_OK,
         )
+        set_refresh_cookie(response, str(refresh))
+        return response
 
 
 class SellerApplyView(generics.CreateAPIView):
-    """Apply to become a seller"""
+    """Apply to become a seller."""
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = SellerApplicationSerializer
@@ -235,7 +242,7 @@ class SellerApplyView(generics.CreateAPIView):
         if hasattr(self.request.user, "seller"):
             raise serializers.ValidationError(
                 {
-                    "error": "You already have a seller profile"
+                    "error": "You already have a seller profile",
                 }
             )
 
@@ -243,7 +250,7 @@ class SellerApplyView(generics.CreateAPIView):
 
 
 class SellerStatusView(generics.RetrieveAPIView):
-    """Check seller application status"""
+    """Check seller application status."""
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = SellerSerializer
@@ -257,7 +264,7 @@ class SellerStatusView(generics.RetrieveAPIView):
 
 
 class IsSellerPermission(permissions.BasePermission):
-    """Permission check for verified sellers"""
+    """Permission check for verified sellers."""
 
     def has_permission(self, request, view):
         return (
@@ -268,7 +275,7 @@ class IsSellerPermission(permissions.BasePermission):
 
 
 class SellerDashboardView(generics.RetrieveAPIView):
-    """Seller dashboard with stats"""
+    """Seller dashboard with stats."""
 
     permission_classes = [IsSellerPermission]
     serializer_class = SellerSerializer
@@ -278,7 +285,7 @@ class SellerDashboardView(generics.RetrieveAPIView):
 
 
 class SellerStoreView(generics.RetrieveUpdateAPIView):
-    """View and update store information"""
+    """View and update store information."""
 
     permission_classes = [IsSellerPermission]
     serializer_class = SellerUpdateSerializer
@@ -289,7 +296,7 @@ class SellerStoreView(generics.RetrieveUpdateAPIView):
 
 
 class AdminSellersListView(generics.ListAPIView):
-    """Admin: list all sellers with optional filters"""
+    """Admin: list all sellers with optional filters."""
 
     permission_classes = [permissions.IsAdminUser]
     serializer_class = SellerSerializer
@@ -312,7 +319,7 @@ class AdminSellersListView(generics.ListAPIView):
 
 
 class AdminSellerDetailView(generics.RetrieveAPIView):
-    """Admin: view seller details"""
+    """Admin: view seller details."""
 
     permission_classes = [permissions.IsAdminUser]
     serializer_class = SellerSerializer
@@ -325,22 +332,26 @@ class AdminSellerDetailView(generics.RetrieveAPIView):
 
 
 class AdminPendingSellersView(generics.ListAPIView):
-    """Admin: list pending seller applications"""
+    """Admin: list pending seller applications."""
 
     permission_classes = [permissions.IsAdminUser]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
-        return Seller.objects.select_related(
-            "user",
-            "verified_by",
-        ).filter(
-            status=Seller.StatusChoices.PENDING,
-        ).order_by("-applied_at")
+        return (
+            Seller.objects.select_related(
+                "user",
+                "verified_by",
+            )
+            .filter(
+                status=Seller.StatusChoices.PENDING,
+            )
+            .order_by("-applied_at")
+        )
 
 
 class AdminSellerVerifyView(generics.GenericAPIView):
-    """Admin: approve a pending seller application"""
+    """Admin: approve a pending seller application."""
 
     permission_classes = [permissions.IsAdminUser]
     serializer_class = SellerSerializer
@@ -352,7 +363,7 @@ class AdminSellerVerifyView(generics.GenericAPIView):
         except Seller.DoesNotExist:
             return Response(
                 {
-                    "error": "Seller not found"
+                    "error": "Seller not found",
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -360,7 +371,7 @@ class AdminSellerVerifyView(generics.GenericAPIView):
         if seller.status != Seller.StatusChoices.PENDING:
             return Response(
                 {
-                    "error": "Only pending seller applications can be approved"
+                    "error": "Only pending seller applications can be approved",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -374,7 +385,7 @@ class AdminSellerVerifyView(generics.GenericAPIView):
                 "seller": SellerSerializer(
                     seller,
                     context={
-                        "request": request
+                        "request": request,
                     },
                 ).data,
             },
@@ -383,7 +394,7 @@ class AdminSellerVerifyView(generics.GenericAPIView):
 
 
 class AdminSellerRejectView(generics.GenericAPIView):
-    """Admin: reject a pending seller application"""
+    """Admin: reject a pending seller application."""
 
     permission_classes = [permissions.IsAdminUser]
     serializer_class = SellerSerializer
@@ -395,7 +406,7 @@ class AdminSellerRejectView(generics.GenericAPIView):
         except Seller.DoesNotExist:
             return Response(
                 {
-                    "error": "Seller not found"
+                    "error": "Seller not found",
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -403,7 +414,7 @@ class AdminSellerRejectView(generics.GenericAPIView):
         if seller.status != Seller.StatusChoices.PENDING:
             return Response(
                 {
-                    "error": "Only pending seller applications can be rejected"
+                    "error": "Only pending seller applications can be rejected",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -422,7 +433,7 @@ class AdminSellerRejectView(generics.GenericAPIView):
                 "seller": SellerSerializer(
                     seller,
                     context={
-                        "request": request
+                        "request": request,
                     },
                 ).data,
             },
@@ -431,7 +442,7 @@ class AdminSellerRejectView(generics.GenericAPIView):
 
 
 class PasswordResetRequestView(generics.CreateAPIView):
-    """Request password reset via email OTP"""
+    """Request password reset via email OTP."""
 
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetRequestSerializer
@@ -442,7 +453,6 @@ class PasswordResetRequestView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         email = serializer.validated_data["email"]
-
         otp = OTP.generate_otp(email=email)
 
         try:
@@ -476,7 +486,7 @@ class PasswordResetRequestView(generics.CreateAPIView):
 
 
 class PasswordResetVerifyView(generics.GenericAPIView):
-    """Verify email OTP and reset password"""
+    """Verify email OTP and reset password."""
 
     permission_classes = [permissions.AllowAny]
     serializer_class = PasswordResetVerifySerializer
@@ -498,7 +508,7 @@ class PasswordResetVerifyView(generics.GenericAPIView):
         if not success:
             return Response(
                 {
-                    "error": message
+                    "error": message,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -509,7 +519,7 @@ class PasswordResetVerifyView(generics.GenericAPIView):
         except User.DoesNotExist:
             return Response(
                 {
-                    "error": "User not found"
+                    "error": "User not found",
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -519,14 +529,14 @@ class PasswordResetVerifyView(generics.GenericAPIView):
 
         return Response(
             {
-                "message": "Password reset successful"
+                "message": "Password reset successful",
             },
             status=status.HTTP_200_OK,
         )
 
 
 class ChangePasswordView(generics.GenericAPIView):
-    """Change password for authenticated user"""
+    """Change password for authenticated user."""
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ChangePasswordSerializer
@@ -542,7 +552,7 @@ class ChangePasswordView(generics.GenericAPIView):
         if not user.check_password(old_password):
             return Response(
                 {
-                    "old_password": "Wrong password"
+                    "old_password": "Wrong password",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -552,14 +562,14 @@ class ChangePasswordView(generics.GenericAPIView):
 
         return Response(
             {
-                "message": "Password changed successfully"
+                "message": "Password changed successfully",
             },
             status=status.HTTP_200_OK,
         )
 
 
 class DeleteAccountView(generics.GenericAPIView):
-    """Delete authenticated user account"""
+    """Delete authenticated user account."""
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = DeleteAccountSerializer
@@ -583,14 +593,14 @@ class DeleteAccountView(generics.GenericAPIView):
 
         return Response(
             {
-                "message": "Your account has been deleted successfully"
+                "message": "Your account has been deleted successfully",
             },
             status=status.HTTP_200_OK,
         )
 
 
 class AdminDeleteUserView(generics.GenericAPIView):
-    """Admin: delete a user account"""
+    """Admin: delete a user account."""
 
     permission_classes = [permissions.IsAdminUser]
 
@@ -601,7 +611,7 @@ class AdminDeleteUserView(generics.GenericAPIView):
         except User.DoesNotExist:
             return Response(
                 {
-                    "error": "User not found"
+                    "error": "User not found",
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -609,7 +619,7 @@ class AdminDeleteUserView(generics.GenericAPIView):
         if user.id == request.user.id:
             return Response(
                 {
-                    "error": "You cannot delete your own account"
+                    "error": "You cannot delete your own account",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -617,7 +627,7 @@ class AdminDeleteUserView(generics.GenericAPIView):
         if user.is_superuser:
             return Response(
                 {
-                    "error": "Cannot delete super admin accounts"
+                    "error": "Cannot delete super admin accounts",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -648,14 +658,14 @@ class AdminDeleteUserView(generics.GenericAPIView):
 
         return Response(
             {
-                "message": f"User {user.email} deleted successfully"
+                "message": f"User {user.email} deleted successfully",
             },
             status=status.HTTP_200_OK,
         )
 
 
 class EmailVerifyRequestView(generics.GenericAPIView):
-    """Request email verification"""
+    """Request email verification."""
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = EmailVerifyRequestSerializer
@@ -670,7 +680,7 @@ class EmailVerifyRequestView(generics.GenericAPIView):
         if user.email_verified:
             return Response(
                 {
-                    "error": "Your email is already verified"
+                    "error": "Your email is already verified",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -719,7 +729,7 @@ class EmailVerifyRequestView(generics.GenericAPIView):
 
 
 class EmailVerifyConfirmView(generics.GenericAPIView):
-    """Confirm email verification"""
+    """Confirm email verification."""
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = EmailVerifyConfirmSerializer
@@ -734,7 +744,7 @@ class EmailVerifyConfirmView(generics.GenericAPIView):
         if user.email_verified:
             return Response(
                 {
-                    "error": "Email already verified"
+                    "error": "Email already verified",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -742,7 +752,7 @@ class EmailVerifyConfirmView(generics.GenericAPIView):
         if not verify_email_token(user, token):
             return Response(
                 {
-                    "error": "Invalid or expired token"
+                    "error": "Invalid or expired token",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -758,10 +768,77 @@ class EmailVerifyConfirmView(generics.GenericAPIView):
 
         return Response(
             {
-                "message": "Email verified successfully"
+                "message": "Email verified successfully",
             },
             status=status.HTTP_200_OK,
         )
-        
+
+
 class ThrottledTokenObtainPairView(TokenObtainPairView):
     throttle_classes = [AuthIPRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+
+        refresh_token = response.data.get("refresh")
+        access_token = response.data.get("access")
+
+        response.data = {
+            "access": access_token,
+        }
+
+        if refresh_token:
+            set_refresh_cookie(response, refresh_token)
+
+        return response
+
+
+class CookieTokenRefreshView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [AuthIPRateThrottle]
+
+    def post(self, request):
+        raw_refresh_token = request.COOKIES.get(get_refresh_cookie_name())
+
+        if not raw_refresh_token:
+            return Response(
+                {
+                    "detail": "Refresh token cookie was not provided.",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+            refresh = RefreshToken(raw_refresh_token)
+            access_token = str(refresh.access_token)
+
+        except TokenError:
+            response = Response(
+                {
+                    "detail": "Refresh token is invalid or expired.",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+            clear_refresh_cookie(response)
+            return response
+
+        return Response(
+            {
+                "access": access_token,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogoutView(generics.GenericAPIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        response = Response(
+            {
+                "message": "Logged out successfully",
+            },
+            status=status.HTTP_200_OK,
+        )
+        clear_refresh_cookie(response)
+        return response

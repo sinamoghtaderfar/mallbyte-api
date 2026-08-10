@@ -314,3 +314,12 @@ OTP_EMAIL_SUBJECT = os.getenv(
     "OTP_EMAIL_SUBJECT",
     "Your MallByte verification code",
 )
+
+# Auth cookies
+AUTH_REFRESH_COOKIE_NAME = os.getenv("AUTH_REFRESH_COOKIE_NAME", "mallbyte_refresh")
+AUTH_REFRESH_COOKIE_PATH = os.getenv("AUTH_REFRESH_COOKIE_PATH", "/api/auth/")
+AUTH_COOKIE_SECURE = env_bool("AUTH_COOKIE_SECURE", not DEBUG)
+AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
+
+# Required for the Next.js frontend to send refresh cookies
+CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)

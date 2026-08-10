@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
+from apps.accounts.cookies import get_refresh_cookie_name
 from apps.accounts.models import OTP, Address, Profile, Seller, User
 from apps.accounts.otp_delivery import mask_email, normalize_email, send_otp_email
 from apps.accounts.utils import generate_email_verification_token
@@ -244,7 +245,9 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn("access", response.data)
-        self.assertIn("refresh", response.data)
+        self.assertNotIn("refresh", response.data)
+        self.assertIn(get_refresh_cookie_name(), response.cookies)
+        self.assertTrue(response.cookies[get_refresh_cookie_name()]["httponly"])
         self.assertEqual(response.data["user"]["email"], "register@example.com")
 
         user = User.objects.get(email="register@example.com")
@@ -287,7 +290,9 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
-        self.assertIn("refresh", response.data)
+        self.assertNotIn("refresh", response.data)
+        self.assertIn(get_refresh_cookie_name(), response.cookies)
+        self.assertTrue(response.cookies[get_refresh_cookie_name()]["httponly"])
 
     def test_token_login_rejects_wrong_password(self):
         self.create_user(
@@ -357,7 +362,9 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data["is_new"])
         self.assertIn("access", response.data)
-        self.assertIn("refresh", response.data)
+        self.assertNotIn("refresh", response.data)
+        self.assertIn(get_refresh_cookie_name(), response.cookies)
+        self.assertTrue(response.cookies[get_refresh_cookie_name()]["httponly"])
         self.assertEqual(response.data["user"]["email"], "new-otp-user@example.com")
         self.assertTrue(response.data["user"]["email_verified"])
 
