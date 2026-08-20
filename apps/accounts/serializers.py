@@ -196,6 +196,39 @@ class AddressSerializer(serializers.ModelSerializer):
 
         return value
 
+    def _validate_place_name(self, value, field_name):
+        """
+        Validate city/province names.
+
+        Accepts names with Unicode letters, spaces, hyphens,
+        apostrophes, and dots. Rejects numbers and symbols.
+        """
+        value = value.strip()
+
+        if len(value) < 2 or len(value) > 100:
+            raise serializers.ValidationError(
+                f"{field_name} must be between 2 and 100 characters."
+            )
+
+        allowed_punctuation = {"-", "'", "’", "."}
+
+        if not all(
+            char.isalpha() or char.isspace() or char in allowed_punctuation
+            for char in value
+        ):
+            raise serializers.ValidationError(
+                f"{field_name} can only contain letters, spaces, hyphens, apostrophes, or dots."
+            )
+
+        return value
+
+    def validate_province(self, value):
+        return self._validate_place_name(value, "Province")
+
+    def validate_city(self, value):
+        return self._validate_place_name(value, "City")
+
+
 
 class OTPRequestSerializer(serializers.Serializer):
     """Serializer for requesting email OTP"""
