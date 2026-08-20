@@ -148,17 +148,52 @@ class AddressSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user", "created_at", "updated_at"]
 
     def validate_postal_code(self, value):
-        """Validate postal code (10 digits)"""
-        if not value.isdigit() or len(value) != 10:
-            raise serializers.ValidationError("Postal code must be exactly 10 digits")
+        """
+        Validate postal code.
+
+        Postal code formats differ by country:
+        - Iran often uses 10 digits
+        - Germany uses 5 digits
+        - Some countries use letters, spaces, or hyphens
+
+        So we keep it flexible, but still reject clearly invalid values.
+        """
+        value = value.strip()
+
+        if len(value) < 3 or len(value) > 20:
+            raise serializers.ValidationError(
+                "Postal code must be between 3 and 20 characters."
+            )
+
+        if not re.match(r"^[A-Za-z0-9\s\-]+$", value):
+            raise serializers.ValidationError(
+                "Postal code can only contain letters, numbers, spaces, or hyphens."
+            )
+
         return value
 
     def validate_receiver_phone(self, value):
-        """Validate phone number (11 digits starting with 09)"""
-        if not value.isdigit() or len(value) != 11 or not value.startswith("09"):
+        """
+        Validate receiver phone.
+
+        Accepted examples:
+        - 09123456789
+        - +989123456789
+        - +4917612345678
+        """
+        value = value.strip().replace(" ", "").replace("-", "")
+
+        local_pattern = r"^0\d{7,14}$"
+        international_pattern = r"^\+\d{8,15}$"
+
+        if not re.match(local_pattern, value) and not re.match(
+            international_pattern,
+            value,
+        ):
             raise serializers.ValidationError(
-                "Phone number must be 11 digits starting with 09"
+                "Phone number must be local format like 09123456789 or international format like +989123456789."
             )
+
         return value
 
 
