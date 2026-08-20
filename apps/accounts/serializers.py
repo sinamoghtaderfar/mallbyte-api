@@ -158,16 +158,16 @@ class AddressSerializer(serializers.ModelSerializer):
 
         So we keep it flexible, but still reject clearly invalid values.
         """
-        value = value.strip()
+        value = value.strip().replace(" ", "")
 
-        if len(value) < 3 or len(value) > 20:
+        if not value.isdigit():
             raise serializers.ValidationError(
-                "Postal code must be between 3 and 20 characters."
+                "Postal code must contain only digits."
             )
 
-        if not re.match(r"^[A-Za-z0-9\s\-]+$", value):
+        if len(value) < 4 or len(value) > 10:
             raise serializers.ValidationError(
-                "Postal code can only contain letters, numbers, spaces, or hyphens."
+                "Postal code must be between 4 and 10 digits."
             )
 
         return value
