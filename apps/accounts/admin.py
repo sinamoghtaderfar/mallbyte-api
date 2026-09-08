@@ -1,9 +1,10 @@
 # apps/accounts/admin.py
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from apps.accounts.models import OTP, Address, Profile, User
+from apps.reviews.admin_roles import REVIEW_MODERATORS_GROUP_NAME, get_or_create_review_moderators_group
 
 # ============================================================
 # User Inlines
@@ -74,6 +75,7 @@ class UserAdmin(DjangoUserAdmin):
         "is_seller",
         "email_verified",
         "is_staff",
+        "is_review_moderator",
         "is_active",
         "is_deleted",
     ]
@@ -168,6 +170,66 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+    actions = [
+        "make_review_moderators",
+        "remove_review_moderator_role",
+    ]
+
+    @admin.display(boolean=True, description="Review moderator")
+    def is_review_moderator(self, obj):
+        return obj.groups.filter(name=REVIEW_MODERATORS_GROUP_NAME).exists()
+
+    @admin.action(description="Make selected users review moderators")
+    def make_review_moderators(self, request, queryset):
+        if not request.user.is_superuser:
+            self.message_user(
+                request,
+                "Only super admins can manage review moderator access.",
+                messages.ERROR,
+            )
+            return
+
+        group = get_or_create_review_moderators_group()
+
+        updated_count = 0
+
+        for user in queryset:
+            user.is_staff = True
+            user.is_superuser = False
+            user.is_active = True
+            user.save(update_fields=["is_staff", "is_superuser", "is_active"])
+            user.groups.add(group)
+            updated_count += 1
+
+        self.message_user(
+            request,
+            f"{updated_count} user(s) can now moderate reviews.",
+            messages.SUCCESS,
+        )
+
+    @admin.action(description="Remove review moderator role from selected users")
+    def remove_review_moderator_role(self, request, queryset):
+        if not request.user.is_superuser:
+            self.message_user(
+                request,
+                "Only super admins can manage review moderator access.",
+                messages.ERROR,
+            )
+            return
+
+        group = get_or_create_review_moderators_group()
+        updated_count = 0
+
+        for user in queryset:
+            user.groups.remove(group)
+            updated_count += 1
+
+        self.message_user(
+            request,
+            f"Removed review moderator access from {updated_count} user(s).",
+            messages.SUCCESS,
+        )
 
     add_fieldsets = (
         (
