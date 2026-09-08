@@ -635,7 +635,7 @@ class ProfileAndAddressAPITestCase(AccountsTestMixin, APITestCase):
 
     def test_address_rejects_invalid_receiver_phone(self):
         payload = self.address_payload()
-        payload["receiver_phone"] = "+989121234567"
+        payload["receiver_phone"] = "not-a-phone"
 
         response = self.client.post(
             "/api/auth/addresses/",

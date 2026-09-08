@@ -1,0 +1,49 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Django check, migrations, and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare Docker environment
+        run: cp .env.docker.example .env.docker
+
+      - name: Build backend image
+        run: docker compose -f compose.yaml -f compose.dev.yaml build
+
+      - name: Prepare writable media directory
+        run: |
+          mkdir -p media
+          sudo chown -R 1000:1000 media
+
+      - name: Run Django checks
+        run: |
+          docker compose -f compose.yaml -f compose.dev.yaml run --rm web sh -c "
+            python manage.py check &&
+            python manage.py makemigrations --check --dry-run &&
+            python manage.py test --noinput -v 2
+          "
+
+      - name: Stop containers
+        if: always()
+        run: docker compose -f compose.yaml -f compose.dev.yaml down -v
