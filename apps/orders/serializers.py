@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
@@ -320,6 +322,224 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "status_history",
         ]
         read_only_fields = fields
+
+
+
+# ============================================================
+# Seller Order Serializers
+# ============================================================
+
+
+class SellerOrderItemSerializer(serializers.ModelSerializer):
+    """
+    Item view for sellers.
+
+    Sellers only see order items that belong to their own products.
+    """
+
+    product_name = serializers.CharField(read_only=True)
+    product_sku = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = OrderItem
+        fields = [
+            "id",
+            "product",
+            "product_name",
+            "product_sku",
+            "quantity",
+            "unit_price",
+            "total_price",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SellerOrderListSerializer(serializers.ModelSerializer):
+    """
+    Lightweight order list for sellers.
+    """
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+    payment_status_display = serializers.CharField(
+        source="get_payment_status_display",
+        read_only=True,
+    )
+    seller_items_count = serializers.SerializerMethodField()
+    seller_total_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_number",
+            "status",
+            "status_display",
+            "payment_status",
+            "payment_status_display",
+            "seller_items_count",
+            "seller_total_amount",
+            "created_at",
+            "paid_at",
+            "delivered_at",
+        ]
+        read_only_fields = fields
+
+    def _seller_items(self, obj):
+        request = self.context.get("request")
+        if not request:
+            return []
+
+        return [
+            item
+            for item in obj.items.all()
+            if item.product.seller_id == request.user.id
+        ]
+
+    def get_seller_items_count(self, obj):
+        return len(self._seller_items(obj))
+
+    def get_seller_total_amount(self, obj):
+        return sum(
+            (item.total_price for item in self._seller_items(obj)),
+            Decimal("0"),
+        )
+
+
+class SellerOrderDetailSerializer(serializers.ModelSerializer):
+    """
+    Detailed order view for sellers.
+
+    It includes shipping/customer snapshot fields because sellers need them
+    for fulfillment, but only includes the seller's own order items.
+    """
+
+    items = serializers.SerializerMethodField()
+    status_history = OrderStatusHistorySerializer(many=True, read_only=True)
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+    payment_status_display = serializers.CharField(
+        source="get_payment_status_display",
+        read_only=True,
+    )
+    seller_items_count = serializers.SerializerMethodField()
+    seller_total_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_number",
+            "status",
+            "status_display",
+            "payment_status",
+            "payment_status_display",
+            "seller_items_count",
+            "seller_total_amount",
+            "receiver_name",
+            "receiver_phone",
+            "province",
+            "city",
+            "address",
+            "postal_code",
+            "customer_note",
+            "paid_at",
+            "cancelled_at",
+            "delivered_at",
+            "created_at",
+            "updated_at",
+            "items",
+            "status_history",
+        ]
+        read_only_fields = fields
+
+    def _seller_items_queryset(self, obj):
+        request = self.context.get("request")
+        if not request:
+            return obj.items.none()
+
+        return obj.items.select_related("product").filter(
+            product__seller=request.user,
+        )
+
+    def get_items(self, obj):
+        serializer = SellerOrderItemSerializer(
+            self._seller_items_queryset(obj),
+            many=True,
+        )
+        return serializer.data
+
+    def get_seller_items_count(self, obj):
+        return self._seller_items_queryset(obj).count()
+
+    def get_seller_total_amount(self, obj):
+        return sum(
+            (
+                item.total_price
+                for item in self._seller_items_queryset(obj)
+            ),
+            Decimal("0"),
+        )
+
+
+class SellerOrderStatusUpdateSerializer(serializers.Serializer):
+    """
+    Seller serializer for fulfillment status changes.
+
+    Sellers can only move paid orders through the fulfillment flow:
+    paid -> processing -> shipped -> delivered
+    """
+
+    status = serializers.ChoiceField(
+        choices=[
+            (Order.StatusChoices.PROCESSING, Order.StatusChoices.PROCESSING.label),
+            (Order.StatusChoices.SHIPPED, Order.StatusChoices.SHIPPED.label),
+            (Order.StatusChoices.DELIVERED, Order.StatusChoices.DELIVERED.label),
+        ],
+    )
+    note = serializers.CharField(required=False, allow_blank=True)
+
+    allowed_transitions = {
+        Order.StatusChoices.PAID: {Order.StatusChoices.PROCESSING},
+        Order.StatusChoices.PROCESSING: {Order.StatusChoices.SHIPPED},
+        Order.StatusChoices.SHIPPED: {Order.StatusChoices.DELIVERED},
+    }
+
+    def validate_status(self, new_status):
+        order = self.context.get("order")
+
+        if not order:
+            return new_status
+
+        if order.payment_status != Order.PaymentStatusChoices.PAID:
+            raise serializers.ValidationError(
+                "Only paid orders can be fulfilled by sellers."
+            )
+
+        if order.status in {
+            Order.StatusChoices.CANCELLED,
+            Order.StatusChoices.REFUNDED,
+            Order.StatusChoices.DELIVERED,
+        }:
+            raise serializers.ValidationError(
+                "This order cannot be changed by the seller."
+            )
+
+        allowed_next_statuses = self.allowed_transitions.get(order.status, set())
+
+        if new_status not in allowed_next_statuses:
+            raise serializers.ValidationError(
+                "Invalid seller order status transition."
+            )
+
+        return new_status
+
 
 
 # ============================================================

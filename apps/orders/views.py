@@ -3,8 +3,10 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -15,6 +17,9 @@ from apps.orders.serializers import (
     CheckoutSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
+    SellerOrderDetailSerializer,
+    SellerOrderListSerializer,
+    SellerOrderStatusUpdateSerializer,
     OrderStatusUpdateSerializer,
     UpdateCartItemSerializer,
 )
@@ -202,10 +207,50 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == "checkout":
             return CheckoutSerializer
 
+        if self.action == "seller_orders":
+            return SellerOrderListSerializer
+
+        if self.action == "seller_detail":
+            return SellerOrderDetailSerializer
+
+        if self.action == "seller_status":
+            return SellerOrderStatusUpdateSerializer
+
         if self.action == "update_status":
             return OrderStatusUpdateSerializer
 
         return OrderDetailSerializer
+
+
+    def _require_seller(self, user):
+        """
+        Ensure current user is a seller.
+        """
+        if not getattr(user, "is_seller", False):
+            raise PermissionDenied("Only sellers can access seller orders.")
+
+    def _get_seller_queryset(self, user):
+        """
+        Orders that contain at least one product owned by this seller.
+        """
+        self._require_seller(user)
+
+        return (
+            Order.objects.select_related("user")
+            .prefetch_related(
+                "items__product",
+                "status_history",
+            )
+            .filter(items__product__seller=user)
+            .distinct()
+        )
+
+    def _get_seller_order_or_404(self, user, pk):
+        """
+        Retrieve one seller-visible order.
+        """
+        return get_object_or_404(self._get_seller_queryset(user), pk=pk)
+
 
     @action(detail=False, methods=["post"], url_path="checkout")
     def checkout(self, request):
@@ -277,6 +322,97 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         order.refresh_from_db()
         response_serializer = OrderDetailSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+    @action(detail=False, methods=["get"], url_path="seller")
+    def seller_orders(self, request):
+        """
+        List orders that contain this seller's products.
+
+        Endpoint:
+        GET /api/orders/orders/seller/
+        """
+        orders = self._get_seller_queryset(request.user)
+
+        serializer = SellerOrderListSerializer(
+            orders,
+            many=True,
+            context={"request": request},
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="seller-detail")
+    def seller_detail(self, request, pk=None):
+        """
+        Show one seller-visible order.
+
+        Endpoint:
+        GET /api/orders/orders/{id}/seller-detail/
+        """
+        order = self._get_seller_order_or_404(request.user, pk)
+
+        serializer = SellerOrderDetailSerializer(
+            order,
+            context={"request": request},
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="seller-status")
+    def seller_status(self, request, pk=None):
+        """
+        Update fulfillment status for seller-visible orders.
+
+        Endpoint:
+        POST /api/orders/orders/{id}/seller-status/
+        """
+        order = self._get_seller_order_or_404(request.user, pk)
+
+        serializer = SellerOrderStatusUpdateSerializer(
+            data=request.data,
+            context={"order": order},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        old_status = order.status
+        new_status = serializer.validated_data["status"]
+        note = serializer.validated_data.get("note", "")
+
+        order.status = new_status
+
+        update_fields = ["status", "total_amount", "updated_at"]
+
+        if new_status == Order.StatusChoices.DELIVERED:
+            order.delivered_at = timezone.now()
+            update_fields.append("delivered_at")
+
+        order.save(update_fields=update_fields)
+
+        OrderStatusHistory.objects.create(
+            order=order,
+            old_status=old_status,
+            new_status=new_status,
+            changed_by=request.user,
+            note=note,
+        )
+
+        create_order_notification(
+            order=order,
+            template_key="order_status_updated",
+            order_id=order.order_number,
+            status_display=order.get_status_display(),
+            metadata={
+                "status": order.status,
+            },
+        )
+
+        order.refresh_from_db()
+
+        response_serializer = SellerOrderDetailSerializer(
+            order,
+            context={"request": request},
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
 
     @action(
         detail=True,
