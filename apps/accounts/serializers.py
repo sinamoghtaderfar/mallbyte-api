@@ -20,11 +20,15 @@ class UserSerializer(serializers.ModelSerializer):
             "phone",
             "full_name",
             "is_seller",
+            "is_staff",
+            "is_superuser",
             "email_verified",
         ]
         read_only_fields = [
             "id",
             "is_seller",
+            "is_staff",
+            "is_superuser",
             "email_verified",
         ]
 
