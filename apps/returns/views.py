@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -77,6 +78,49 @@ class ReturnRequestViewSet(
 
         response_serializer = ReturnRequestDetailSerializer(return_request)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+    def _get_seller_return_queryset(self):
+        return (
+            ReturnRequest.objects.select_related(
+                "customer",
+                "order",
+                "reviewed_by",
+            )
+            .prefetch_related(
+                "items",
+                "items__order_item",
+                "items__order_item__product",
+                "attachments",
+                "status_history",
+            )
+            .filter(items__order_item__product__seller=self.request.user)
+            .distinct()
+        )
+
+    @action(detail=False, methods=["get"], url_path="seller")
+    def seller(self, request):
+        queryset = self.filter_queryset(
+            self._get_seller_return_queryset().order_by("-created_at")
+        )
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="seller-detail")
+    def seller_detail(self, request, pk=None):
+        return_request = get_object_or_404(
+            self._get_seller_return_queryset(),
+            pk=pk,
+        )
+
+        serializer = self.get_serializer(return_request)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
