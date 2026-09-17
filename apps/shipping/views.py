@@ -1,19 +1,23 @@
 # Create shipment from paid order
 # List shipments
 # Retrieve shipment detail
+# List eligible paid orders for shipment creation
 # Mark ready
 # Mark shipped
 # Mark delivered
 # Cancel shipment
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Exists, OuterRef
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.orders.models import Order
 from apps.shipping.models import Shipment
 from apps.shipping.serializers import (
+    EligibleShipmentOrderSerializer,
     ShipmentCancelSerializer,
     ShipmentCreateSerializer,
     ShipmentDetailSerializer,
@@ -37,6 +41,7 @@ class ShipmentViewSet(
     Main endpoints:
     - GET    /api/shipping/shipments/
     - POST   /api/shipping/shipments/
+    - GET    /api/shipping/shipments/eligible-orders/
     - GET    /api/shipping/shipments/{id}/
     - POST   /api/shipping/shipments/{id}/mark-ready/
     - POST   /api/shipping/shipments/{id}/mark-shipped/
@@ -103,6 +108,9 @@ class ShipmentViewSet(
         if self.action == "list":
             return ShipmentListSerializer
 
+        if self.action == "eligible_orders":
+            return EligibleShipmentOrderSerializer
+
         if self.action == "create":
             return ShipmentCreateSerializer
 
@@ -138,6 +146,52 @@ class ShipmentViewSet(
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="eligible-orders",
+    )
+    def eligible_orders(self, request):
+        """
+        Return paid orders that do not already have an active shipment.
+
+        An active shipment is any shipment that is not cancelled or returned.
+
+        GET /api/shipping/shipments/eligible-orders/
+        """
+
+        if not self._is_staff_user(request.user):
+            return self._staff_required_response()
+
+        active_shipments = Shipment.objects.filter(
+            order_id=OuterRef("pk"),
+        ).exclude(
+            status__in=[
+                Shipment.StatusChoices.CANCELLED,
+                Shipment.StatusChoices.RETURNED,
+            ],
+        )
+
+        orders = (
+            Order.objects.select_related("user")
+            .filter(status=Order.StatusChoices.PAID)
+            .annotate(
+                has_active_shipment=Exists(active_shipments),
+            )
+            .filter(has_active_shipment=False)
+            .order_by("-paid_at", "-created_at")
+        )
+
+        serializer = self.get_serializer(
+            orders,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
     def create(self, request, *args, **kwargs):
         """
         Create shipment from a paid order.
@@ -159,11 +213,13 @@ class ShipmentViewSet(
         serializer.is_valid(raise_exception=True)
 
         shipment = serializer.save()
+
         create_shipment_notification(
             shipment=shipment,
             template_key="shipment_created",
             order_id=shipment.order.order_number,
         )
+
         response_serializer = ShipmentDetailSerializer(shipment)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -248,6 +304,7 @@ class ShipmentViewSet(
                 note=note,
             )
             shipment.refresh_from_db()
+
             create_shipment_notification(
                 shipment=shipment,
                 template_key="shipment_shipped",
@@ -292,6 +349,7 @@ class ShipmentViewSet(
                 note=note,
             )
             shipment.refresh_from_db()
+
             create_shipment_notification(
                 shipment=shipment,
                 template_key="shipment_delivered",
@@ -336,6 +394,7 @@ class ShipmentViewSet(
                 note=note,
             )
             shipment.refresh_from_db()
+
             create_shipment_notification(
                 shipment=shipment,
                 template_key="shipment_cancelled",

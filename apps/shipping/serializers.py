@@ -7,6 +7,7 @@ from apps.shipping.models import Shipment, ShipmentEvent
 # Shipment Event Serializer
 # ============================================================
 
+
 class ShipmentEventSerializer(serializers.ModelSerializer):
     """
     Shows shipment status history.
@@ -34,9 +35,40 @@ class ShipmentEventSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class EligibleShipmentOrderSerializer(serializers.ModelSerializer):
+    """
+    Small order serializer for the admin shipment creation screen.
+
+    Returns only paid orders that are eligible for shipment creation.
+    """
+
+    user_email = serializers.ReadOnlyField(source="user.email")
+    user_full_name = serializers.ReadOnlyField(source="user.full_name")
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "order_number",
+            "user",
+            "user_email",
+            "user_full_name",
+            "total_amount",
+            "shipping_cost",
+            "receiver_name",
+            "receiver_phone",
+            "province",
+            "city",
+            "paid_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
 # ============================================================
 # Shipment List Serializer
 # ============================================================
+
 
 class ShipmentListSerializer(serializers.ModelSerializer):
     """
@@ -81,6 +113,7 @@ class ShipmentListSerializer(serializers.ModelSerializer):
 # ============================================================
 # Shipment Detail Serializer
 # ============================================================
+
 
 class ShipmentDetailSerializer(serializers.ModelSerializer):
     """
@@ -142,6 +175,7 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
 # Shipment Create Serializer
 # ============================================================
 
+
 class ShipmentCreateSerializer(serializers.Serializer):
     """
     Creates shipment from a paid order.
@@ -174,9 +208,7 @@ class ShipmentCreateSerializer(serializers.Serializer):
         # Normal users cannot create shipments for other users.
         # Later, admin/order-manager permissions can be added here.
         if not (user.is_staff or user.is_superuser):
-            raise serializers.ValidationError(
-                "Only staff users can create shipments."
-            )
+            raise serializers.ValidationError("Only staff users can create shipments.")
 
         if order.status != Order.StatusChoices.PAID:
             raise serializers.ValidationError(
@@ -220,6 +252,7 @@ class ShipmentCreateSerializer(serializers.Serializer):
 # Mark Ready Serializer
 # ============================================================
 
+
 class ShipmentMarkReadySerializer(serializers.Serializer):
     """
     Mark shipment as ready to ship.
@@ -249,6 +282,7 @@ class ShipmentMarkReadySerializer(serializers.Serializer):
 # ============================================================
 # Mark Shipped Serializer
 # ============================================================
+
 
 class ShipmentMarkShippedSerializer(serializers.Serializer):
     """
@@ -298,6 +332,7 @@ class ShipmentMarkShippedSerializer(serializers.Serializer):
 # Mark Delivered Serializer
 # ============================================================
 
+
 class ShipmentMarkDeliveredSerializer(serializers.Serializer):
     """
     Mark shipment as delivered.
@@ -334,6 +369,7 @@ class ShipmentMarkDeliveredSerializer(serializers.Serializer):
 # Shipment Cancel Serializer
 # ============================================================
 
+
 class ShipmentCancelSerializer(serializers.Serializer):
     """
     Cancel shipment.
@@ -353,13 +389,9 @@ class ShipmentCancelSerializer(serializers.Serializer):
         shipment = self.context["shipment"]
 
         if shipment.status == Shipment.StatusChoices.DELIVERED:
-            raise serializers.ValidationError(
-                "Delivered shipment cannot be cancelled."
-            )
+            raise serializers.ValidationError("Delivered shipment cannot be cancelled.")
 
         if shipment.status == Shipment.StatusChoices.CANCELLED:
-            raise serializers.ValidationError(
-                "Shipment is already cancelled."
-            )
+            raise serializers.ValidationError("Shipment is already cancelled.")
 
         return attrs
