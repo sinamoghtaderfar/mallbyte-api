@@ -5,7 +5,16 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.inventory.models import Stock, StockMovement, StockTransfer, Warehouse
+from apps.inventory.models import (
+    Stock,
+    StockMovement,
+    StockTransfer,
+    Warehouse,
+)
+from apps.inventory.permissions import (
+    CanAccessInventory,
+    CanAccessStockTransfers,
+)
 from apps.inventory.serializers import (
     StockListSerializer,
     StockMovementListSerializer,
@@ -19,48 +28,99 @@ from apps.inventory.serializers import (
     WarehouseListSerializer,
     WarehouseSerializer,
 )
-from apps.rbac.permissions import IsProductAdmin
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):
     """
     Manage warehouses.
-    Only product admins / superusers should manage inventory warehouses.
+
+    Read:
+        view_inventory
+
+    Create/update/delete:
+        manage_inventory
     """
 
     queryset = Warehouse.objects.all()
-    permission_classes = [IsAuthenticated, IsProductAdmin]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["name", "code", "city", "province", "manager_name"]
-    ordering_fields = ["name", "code", "city", "created_at", "updated_at"]
+    permission_classes = [
+        IsAuthenticated,
+        CanAccessInventory,
+    ]
+    filter_backends = [
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    search_fields = [
+        "name",
+        "code",
+        "city",
+        "province",
+        "manager_name",
+    ]
+    ordering_fields = [
+        "name",
+        "code",
+        "city",
+        "created_at",
+        "updated_at",
+    ]
     ordering = ["name"]
 
     def get_serializer_class(self):
         if self.action == "list":
             return WarehouseListSerializer
+
         return WarehouseSerializer
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        serializer.save(
+            created_by=self.request.user,
+        )
 
-    @action(detail=False, methods=["get"], url_path="active")
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="active",
+    )
     def active(self, request):
-        """List active warehouses only."""
-        warehouses = self.get_queryset().filter(is_active=True)
+        """
+        List active warehouses only.
+        """
+
+        warehouses = self.get_queryset().filter(
+            is_active=True,
+        )
+
         page = self.paginate_queryset(warehouses)
 
         if page is not None:
-            serializer = WarehouseListSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+            serializer = WarehouseListSerializer(
+                page,
+                many=True,
+            )
+            return self.get_paginated_response(
+                serializer.data,
+            )
 
-        serializer = WarehouseListSerializer(warehouses, many=True)
+        serializer = WarehouseListSerializer(
+            warehouses,
+            many=True,
+        )
+
         return Response(serializer.data)
 
 
 class StockViewSet(viewsets.ModelViewSet):
     """
     Manage stock records.
-    Stock is per product per warehouse.
+
+    Stock is stored per product per warehouse.
+
+    Read:
+        view_inventory
+
+    Create/update/delete/reserve/release:
+        manage_inventory
     """
 
     queryset = Stock.objects.select_related(
@@ -68,8 +128,17 @@ class StockViewSet(viewsets.ModelViewSet):
         "warehouse",
         "updated_by",
     ).all()
-    permission_classes = [IsAuthenticated, IsProductAdmin]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    permission_classes = [
+        IsAuthenticated,
+        CanAccessInventory,
+    ]
+
+    filter_backends = [
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+
     search_fields = [
         "product__name",
         "product__sku",
@@ -79,13 +148,18 @@ class StockViewSet(viewsets.ModelViewSet):
         "shelf",
         "bin_code",
     ]
+
     ordering_fields = [
         "quantity",
         "reserved_quantity",
         "low_stock_threshold",
         "last_updated",
     ]
-    ordering = ["product__name", "warehouse__name"]
+
+    ordering = [
+        "product__name",
+        "warehouse__name",
+    ]
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -108,90 +182,175 @@ class StockViewSet(viewsets.ModelViewSet):
         in_stock = self.request.query_params.get("in_stock")
 
         if product_id:
-            queryset = queryset.filter(product_id=product_id)
-
-        if warehouse_id:
-            queryset = queryset.filter(warehouse_id=warehouse_id)
-
-        if low_stock in ["true", "1", "yes"]:
             queryset = queryset.filter(
-                quantity__lte=F("low_stock_threshold") + F("reserved_quantity")
+                product_id=product_id,
             )
 
-        if in_stock in ["true", "1", "yes"]:
-            queryset = queryset.filter(quantity__gt=0)
+        if warehouse_id:
+            queryset = queryset.filter(
+                warehouse_id=warehouse_id,
+            )
+
+        if low_stock in [
+            "true",
+            "1",
+            "yes",
+        ]:
+            queryset = queryset.filter(
+                quantity__lte=(F("low_stock_threshold") + F("reserved_quantity"))
+            )
+
+        if in_stock in [
+            "true",
+            "1",
+            "yes",
+        ]:
+            queryset = queryset.filter(
+                quantity__gt=0,
+            )
 
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(updated_by=self.request.user)
+        serializer.save(
+            updated_by=self.request.user,
+        )
 
     def perform_update(self, serializer):
-        serializer.save(updated_by=self.request.user)
+        serializer.save(
+            updated_by=self.request.user,
+        )
 
-    @action(detail=False, methods=["get"], url_path="low-stock")
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="low-stock",
+    )
     def low_stock(self, request):
-        """List stock records where available quantity is low."""
+        """
+        List stock records where available quantity
+        is below or equal to the low-stock threshold.
+        """
+
         queryset = self.get_queryset().filter(
-            quantity__lte=F("low_stock_threshold") + F("reserved_quantity")
+            quantity__lte=(F("low_stock_threshold") + F("reserved_quantity"))
         )
 
         page = self.paginate_queryset(queryset)
 
         if page is not None:
-            serializer = StockListSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+            serializer = StockListSerializer(
+                page,
+                many=True,
+            )
 
-        serializer = StockListSerializer(queryset, many=True)
+            return self.get_paginated_response(
+                serializer.data,
+            )
+
+        serializer = StockListSerializer(
+            queryset,
+            many=True,
+        )
+
         return Response(serializer.data)
 
-    @action(detail=False, methods=["post"], url_path="reserve")
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="reserve",
+    )
     def reserve(self, request):
-        """Reserve stock for a pending order."""
-        serializer = StockReserveSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        """
+        Reserve stock for an order.
+        """
+
+        serializer = StockReserveSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(
+            raise_exception=True,
+        )
 
         stock = serializer.validated_data["stock"]
         quantity = serializer.validated_data["quantity"]
 
         try:
-            stock.reserve(quantity=quantity, user=request.user)
+            stock.reserve(
+                quantity=quantity,
+                user=request.user,
+            )
             stock.refresh_from_db()
+
         except DjangoValidationError as exc:
             return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = StockSerializer(stock)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        response_serializer = StockSerializer(
+            stock,
+        )
 
-    @action(detail=False, methods=["post"], url_path="release-reservation")
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="release-reservation",
+    )
     def release_reservation(self, request):
-        """Release reserved stock."""
-        serializer = StockReleaseReservationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        """
+        Release previously reserved stock.
+        """
+
+        serializer = StockReleaseReservationSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(
+            raise_exception=True,
+        )
 
         stock = serializer.validated_data["stock"]
         quantity = serializer.validated_data["quantity"]
 
         try:
-            stock.release_reservation(quantity=quantity, user=request.user)
+            stock.release_reservation(
+                quantity=quantity,
+                user=request.user,
+            )
             stock.refresh_from_db()
+
         except DjangoValidationError as exc:
             return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = StockSerializer(stock)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        response_serializer = StockSerializer(
+            stock,
+        )
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class StockMovementViewSet(viewsets.ModelViewSet):
     """
     Manage stock movements.
+
     Every stock increase/decrease is recorded here.
+
+    Read:
+        view_inventory
+
+    Create/update/delete:
+        manage_inventory
     """
 
     queryset = StockMovement.objects.select_related(
@@ -199,8 +358,17 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         "warehouse",
         "created_by",
     ).all()
-    permission_classes = [IsAuthenticated, IsProductAdmin]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    permission_classes = [
+        IsAuthenticated,
+        CanAccessInventory,
+    ]
+
+    filter_backends = [
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+
     search_fields = [
         "product__name",
         "product__sku",
@@ -210,17 +378,20 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         "reason",
         "notes",
     ]
+
     ordering_fields = [
         "created_at",
         "quantity",
         "before_quantity",
         "after_quantity",
     ]
+
     ordering = ["-created_at"]
 
     def get_serializer_class(self):
         if self.action == "list":
             return StockMovementListSerializer
+
         return StockMovementSerializer
 
     def get_queryset(self):
@@ -232,28 +403,46 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         reference_id = self.request.query_params.get("reference_id")
 
         if product_id:
-            queryset = queryset.filter(product_id=product_id)
+            queryset = queryset.filter(
+                product_id=product_id,
+            )
 
         if warehouse_id:
-            queryset = queryset.filter(warehouse_id=warehouse_id)
+            queryset = queryset.filter(
+                warehouse_id=warehouse_id,
+            )
 
         if movement_type:
-            queryset = queryset.filter(movement_type=movement_type)
+            queryset = queryset.filter(
+                movement_type=movement_type,
+            )
 
         if reference_id:
-            queryset = queryset.filter(reference_id=reference_id)
+            queryset = queryset.filter(
+                reference_id=reference_id,
+            )
 
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        serializer.save(
+            created_by=self.request.user,
+        )
 
 
 class StockTransferViewSet(viewsets.ModelViewSet):
     """
     Manage transfers between warehouses.
-    Completing a transfer creates two stock movements:
-    transfer_out and transfer_in.
+
+    Completing a transfer creates two movements:
+        transfer_out
+        transfer_in
+
+    Read:
+        view_inventory
+
+    Create/update/actions:
+        manage_stock_transfers
     """
 
     queryset = StockTransfer.objects.select_related(
@@ -263,8 +452,17 @@ class StockTransferViewSet(viewsets.ModelViewSet):
         "requested_by",
         "approved_by",
     ).all()
-    permission_classes = [IsAuthenticated, IsProductAdmin]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    permission_classes = [
+        IsAuthenticated,
+        CanAccessStockTransfers,
+    ]
+
+    filter_backends = [
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+
     search_fields = [
         "product__name",
         "product__sku",
@@ -275,6 +473,7 @@ class StockTransferViewSet(viewsets.ModelViewSet):
         "tracking_number",
         "reason",
     ]
+
     ordering_fields = [
         "created_at",
         "updated_at",
@@ -283,13 +482,18 @@ class StockTransferViewSet(viewsets.ModelViewSet):
         "shipped_at",
         "delivered_at",
     ]
+
     ordering = ["-created_at"]
 
     def get_serializer_class(self):
         if self.action == "list":
             return StockTransferListSerializer
 
-        if self.action in ["mark_in_transit", "complete", "cancel"]:
+        if self.action in [
+            "mark_in_transit",
+            "complete",
+            "cancel",
+        ]:
             return StockTransferActionSerializer
 
         return StockTransferSerializer
@@ -303,29 +507,54 @@ class StockTransferViewSet(viewsets.ModelViewSet):
         transfer_status = self.request.query_params.get("status")
 
         if product_id:
-            queryset = queryset.filter(product_id=product_id)
+            queryset = queryset.filter(
+                product_id=product_id,
+            )
 
         if from_warehouse_id:
-            queryset = queryset.filter(from_warehouse_id=from_warehouse_id)
+            queryset = queryset.filter(
+                from_warehouse_id=from_warehouse_id,
+            )
 
         if to_warehouse_id:
-            queryset = queryset.filter(to_warehouse_id=to_warehouse_id)
+            queryset = queryset.filter(
+                to_warehouse_id=to_warehouse_id,
+            )
 
         if transfer_status:
-            queryset = queryset.filter(status=transfer_status)
+            queryset = queryset.filter(
+                status=transfer_status,
+            )
 
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(requested_by=self.request.user)
+        serializer.save(
+            requested_by=self.request.user,
+        )
 
-    @action(detail=True, methods=["post"], url_path="mark-in-transit")
-    def mark_in_transit(self, request, pk=None):
-        """Mark transfer as in transit."""
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="mark-in-transit",
+    )
+    def mark_in_transit(
+        self,
+        request,
+        pk=None,
+    ):
+        """
+        Mark transfer as in transit.
+        """
+
         transfer = self.get_object()
 
-        serializer = StockTransferActionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        serializer = StockTransferActionSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(
+            raise_exception=True,
+        )
 
         tracking_number = serializer.validated_data.get("tracking_number")
 
@@ -335,48 +564,94 @@ class StockTransferViewSet(viewsets.ModelViewSet):
                 tracking_number=tracking_number,
             )
             transfer.refresh_from_db()
+
         except DjangoValidationError as exc:
             return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = StockTransferSerializer(transfer)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        response_serializer = StockTransferSerializer(
+            transfer,
+        )
 
-    @action(detail=True, methods=["post"], url_path="complete")
-    def complete(self, request, pk=None):
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="complete",
+    )
+    def complete(
+        self,
+        request,
+        pk=None,
+    ):
         """
         Complete transfer.
-        This creates transfer_out and transfer_in stock movements.
+
+        Creates:
+            transfer_out movement
+            transfer_in movement
         """
+
         transfer = self.get_object()
 
         try:
-            transfer.complete(user=request.user)
+            transfer.complete(
+                user=request.user,
+            )
             transfer.refresh_from_db()
+
         except DjangoValidationError as exc:
             return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = StockTransferSerializer(transfer)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        response_serializer = StockTransferSerializer(
+            transfer,
+        )
 
-    @action(detail=True, methods=["post"], url_path="cancel")
-    def cancel(self, request, pk=None):
-        """Cancel transfer if it is not completed."""
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="cancel",
+    )
+    def cancel(
+        self,
+        request,
+        pk=None,
+    ):
+        """
+        Cancel a transfer that has not been completed.
+        """
+
         transfer = self.get_object()
 
         try:
             transfer.cancel()
             transfer.refresh_from_db()
+
         except DjangoValidationError as exc:
             return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = StockTransferSerializer(transfer)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        response_serializer = StockTransferSerializer(
+            transfer,
+        )
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
