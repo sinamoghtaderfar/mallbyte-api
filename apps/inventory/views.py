@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import F
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -340,17 +340,22 @@ class StockViewSet(viewsets.ModelViewSet):
         )
 
 
-class StockMovementViewSet(viewsets.ModelViewSet):
+class StockMovementViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
     """
-    Manage stock movements.
-
-    Every stock increase/decrease is recorded here.
+    Append-only stock movement history.
 
     Read:
         view_inventory
 
-    Create/update/delete:
+    Create:
         manage_inventory
+
+    Existing movements cannot be edited or deleted.
     """
 
     queryset = StockMovement.objects.select_related(
@@ -423,6 +428,46 @@ class StockMovementViewSet(viewsets.ModelViewSet):
             )
 
         return queryset
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(
+            data=request.data,
+        )
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        try:
+            self.perform_create(serializer)
+
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                error_data = exc.message_dict
+            else:
+                messages = getattr(
+                    exc,
+                    "messages",
+                    [str(exc)],
+                )
+
+                error_data = {
+                    "detail": (messages[0] if len(messages) == 1 else messages)
+                }
+
+            return Response(
+                error_data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        headers = self.get_success_headers(
+            serializer.data,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
 
     def perform_create(self, serializer):
         serializer.save(

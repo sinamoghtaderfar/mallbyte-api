@@ -202,9 +202,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
         quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
 
         if quantity == 0:
-            raise serializers.ValidationError(
-                {"quantity": "Quantity cannot be zero."}
-            )
+            raise serializers.ValidationError({"quantity": "Quantity cannot be zero."})
 
         increase_types = {
             StockMovement.MovementType.PURCHASE,
@@ -243,7 +241,9 @@ class StockMovementListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for stock movement history."""
 
     product_name = serializers.ReadOnlyField(source="product.name")
+    product_sku = serializers.ReadOnlyField(source="product.sku")
     warehouse_name = serializers.ReadOnlyField(source="warehouse.name")
+    warehouse_code = serializers.ReadOnlyField(source="warehouse.code")
     movement_type_display = serializers.CharField(
         source="get_movement_type_display",
         read_only=True,
@@ -256,14 +256,18 @@ class StockMovementListSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_sku",
             "warehouse",
             "warehouse_name",
+            "warehouse_code",
             "movement_type",
             "movement_type_display",
             "quantity",
             "before_quantity",
             "after_quantity",
             "reference_id",
+            "reason",
+            "notes",
             "created_by_name",
             "created_at",
         ]
