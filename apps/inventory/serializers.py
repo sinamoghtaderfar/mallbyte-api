@@ -282,7 +282,10 @@ class StockTransferSerializer(serializers.ModelSerializer):
     from_warehouse_code = serializers.ReadOnlyField(source="from_warehouse.code")
     to_warehouse_name = serializers.ReadOnlyField(source="to_warehouse.name")
     to_warehouse_code = serializers.ReadOnlyField(source="to_warehouse.code")
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
     requested_by_name = serializers.ReadOnlyField(source="requested_by.full_name")
     approved_by_name = serializers.ReadOnlyField(source="approved_by.full_name")
 
@@ -329,25 +332,96 @@ class StockTransferSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         from_warehouse = attrs.get(
             "from_warehouse",
-            getattr(self.instance, "from_warehouse", None),
+            getattr(
+                self.instance,
+                "from_warehouse",
+                None,
+            ),
         )
+
         to_warehouse = attrs.get(
             "to_warehouse",
-            getattr(self.instance, "to_warehouse", None),
+            getattr(
+                self.instance,
+                "to_warehouse",
+                None,
+            ),
         )
-        quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
+
+        product = attrs.get(
+            "product",
+            getattr(
+                self.instance,
+                "product",
+                None,
+            ),
+        )
+
+        quantity = attrs.get(
+            "quantity",
+            getattr(
+                self.instance,
+                "quantity",
+                None,
+            ),
+        )
 
         if from_warehouse and to_warehouse and from_warehouse == to_warehouse:
             raise serializers.ValidationError(
                 {
-                    "to_warehouse": "Source and destination warehouses cannot be the same."
+                    "to_warehouse": (
+                        "Source and destination warehouses " "cannot be the same."
+                    )
                 }
             )
 
         if quantity is not None and quantity <= 0:
             raise serializers.ValidationError(
-                {"quantity": "Transfer quantity must be greater than zero."}
+                {"quantity": ("Transfer quantity must be greater than zero.")}
             )
+
+        if from_warehouse and not from_warehouse.is_active:
+            raise serializers.ValidationError(
+                {"from_warehouse": ("Source warehouse must be active.")}
+            )
+
+        if to_warehouse and not to_warehouse.is_active:
+            raise serializers.ValidationError(
+                {"to_warehouse": ("Destination warehouse must be active.")}
+            )
+
+        if (
+            self.instance is None
+            and product
+            and from_warehouse
+            and quantity is not None
+        ):
+            try:
+                stock = Stock.objects.get(
+                    product=product,
+                    warehouse=from_warehouse,
+                )
+
+            except Stock.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    {
+                        "product": (
+                            "This product has no stock record "
+                            "in the source warehouse."
+                        )
+                    }
+                ) from exc
+
+            if stock.available_quantity < quantity:
+                raise serializers.ValidationError(
+                    {
+                        "quantity": (
+                            "Transfer quantity cannot exceed "
+                            f"available stock "
+                            f"({stock.available_quantity})."
+                        )
+                    }
+                )
 
         return attrs
 
@@ -364,9 +438,21 @@ class StockTransferListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for stock transfer lists."""
 
     product_name = serializers.ReadOnlyField(source="product.name")
+    product_sku = serializers.ReadOnlyField(source="product.sku")
+
     from_warehouse_name = serializers.ReadOnlyField(source="from_warehouse.name")
+    from_warehouse_code = serializers.ReadOnlyField(source="from_warehouse.code")
+
     to_warehouse_name = serializers.ReadOnlyField(source="to_warehouse.name")
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    to_warehouse_code = serializers.ReadOnlyField(source="to_warehouse.code")
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+
+    requested_by_name = serializers.ReadOnlyField(source="requested_by.full_name")
+    approved_by_name = serializers.ReadOnlyField(source="approved_by.full_name")
 
     class Meta:
         model = StockTransfer
@@ -374,14 +460,22 @@ class StockTransferListSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_sku",
             "from_warehouse",
             "from_warehouse_name",
+            "from_warehouse_code",
             "to_warehouse",
             "to_warehouse_name",
+            "to_warehouse_code",
             "quantity",
             "status",
             "status_display",
             "tracking_number",
+            "shipped_at",
+            "delivered_at",
+            "reason",
+            "requested_by_name",
+            "approved_by_name",
             "created_at",
             "updated_at",
         ]

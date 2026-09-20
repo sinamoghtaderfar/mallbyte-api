@@ -475,7 +475,12 @@ class StockMovementViewSet(
         )
 
 
-class StockTransferViewSet(viewsets.ModelViewSet):
+class StockTransferViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
     """
     Manage transfers between warehouses.
 

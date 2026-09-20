@@ -550,11 +550,8 @@ class StockTransfer(models.Model):
         with transaction.atomic():
             transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
 
-            if transfer.status == self.StatusChoices.COMPLETED:
-                raise ValidationError("This transfer is already completed.")
-
-            if transfer.status == self.StatusChoices.CANCELLED:
-                raise ValidationError("Cancelled transfers cannot be completed.")
+            if transfer.status != self.StatusChoices.IN_TRANSIT:
+                raise ValidationError("Only transfers in transit can be completed.")
 
             reference = f"transfer:{transfer.id}"
 
