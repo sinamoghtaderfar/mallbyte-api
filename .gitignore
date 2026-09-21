@@ -42,3 +42,4 @@ media/
 
 # Docker local environment
 .env.docker
+mallbyte_docker_backup.sql
