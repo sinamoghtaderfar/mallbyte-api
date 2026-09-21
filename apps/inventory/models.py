@@ -1,5 +1,3 @@
-# apps/inventory/models.py
-
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -400,6 +398,7 @@ class StockTransfer(models.Model):
 
     class StatusChoices(models.TextChoices):
         PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
         IN_TRANSIT = "in_transit", "In Transit"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
@@ -433,11 +432,19 @@ class StockTransfer(models.Model):
 
     # Tracking
     tracking_number = models.CharField(
-        max_length=100, blank=True, verbose_name="Tracking Number"
+        max_length=100,
+        blank=True,
+        verbose_name="Tracking Number",
     )
-    shipped_at = models.DateTimeField(null=True, blank=True, verbose_name="Shipped At")
+    shipped_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Shipped At",
+    )
     delivered_at = models.DateTimeField(
-        null=True, blank=True, verbose_name="Delivered At"
+        null=True,
+        blank=True,
+        verbose_name="Delivered At",
     )
 
     # Metadata
@@ -457,6 +464,11 @@ class StockTransfer(models.Model):
         blank=True,
         related_name="approved_transfers",
         verbose_name="Approved By",
+    )
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Approved At",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -486,7 +498,8 @@ class StockTransfer(models.Model):
     def __str__(self):
         return (
             f"Transfer {self.product.name}: "
-            f"{self.from_warehouse.name} → {self.to_warehouse.name} ({self.quantity})"
+            f"{self.from_warehouse.name} → {self.to_warehouse.name} "
+            f"({self.quantity})"
         )
 
     def clean(self):
@@ -494,32 +507,66 @@ class StockTransfer(models.Model):
             if self.from_warehouse_id == self.to_warehouse_id:
                 raise ValidationError(
                     {
-                        "to_warehouse": "Source and destination warehouses cannot be the same."
+                        "to_warehouse": (
+                            "Source and destination warehouses " "cannot be the same."
+                        )
                     }
                 )
 
         if self.quantity <= 0:
             raise ValidationError(
-                {"quantity": "Transfer quantity must be greater than zero."}
+                {"quantity": ("Transfer quantity must be greater than zero.")}
             )
 
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
 
-    def mark_in_transit(self, user=None, tracking_number=None):
-        """Mark transfer as in transit."""
+    def approve(self, user):
+        """Approve a pending transfer by a different authorized user."""
+        if user is None:
+            raise ValidationError("An approving user is required.")
+
         with transaction.atomic():
             transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
 
             if transfer.status != self.StatusChoices.PENDING:
+                raise ValidationError("Only pending transfers can be approved.")
+
+            if transfer.requested_by_id == user.id:
+                raise ValidationError("You cannot approve your own stock transfer.")
+
+            transfer.status = self.StatusChoices.APPROVED
+            transfer.approved_by = user
+            transfer.approved_at = timezone.now()
+
+            transfer.save(
+                update_fields=[
+                    "status",
+                    "approved_by",
+                    "approved_at",
+                    "updated_at",
+                ]
+            )
+
+            self.status = transfer.status
+            self.approved_by = transfer.approved_by
+            self.approved_at = transfer.approved_at
+
+        return self
+
+    def mark_in_transit(self, user=None, tracking_number=None):
+        """Mark an approved transfer as in transit."""
+        with transaction.atomic():
+            transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
+
+            if transfer.status != self.StatusChoices.APPROVED:
                 raise ValidationError(
-                    "Only pending transfers can be marked as in transit."
+                    "Only approved transfers can be marked as in transit."
                 )
 
             transfer.status = self.StatusChoices.IN_TRANSIT
             transfer.shipped_at = timezone.now()
-            transfer.approved_by = user or transfer.approved_by
 
             if tracking_number:
                 transfer.tracking_number = tracking_number
@@ -528,7 +575,6 @@ class StockTransfer(models.Model):
                 update_fields=[
                     "status",
                     "shipped_at",
-                    "approved_by",
                     "tracking_number",
                     "updated_at",
                 ]
@@ -536,7 +582,6 @@ class StockTransfer(models.Model):
 
             self.status = transfer.status
             self.shipped_at = transfer.shipped_at
-            self.approved_by = transfer.approved_by
             self.tracking_number = transfer.tracking_number
 
         return self
@@ -579,32 +624,47 @@ class StockTransfer(models.Model):
 
             transfer.status = self.StatusChoices.COMPLETED
             transfer.delivered_at = timezone.now()
-            transfer.approved_by = user or transfer.approved_by
+
             transfer.save(
                 update_fields=[
                     "status",
                     "delivered_at",
-                    "approved_by",
                     "updated_at",
                 ]
             )
 
             self.status = transfer.status
             self.delivered_at = transfer.delivered_at
-            self.approved_by = transfer.approved_by
 
         return self
 
-    def cancel(self):
-        """Cancel transfer if it has not been completed."""
+    def cancel(self, user):
+        """Cancel a pending or approved transfer by a different user."""
+        if user is None:
+            raise ValidationError("A cancelling user is required.")
+
         with transaction.atomic():
             transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
 
-            if transfer.status == self.StatusChoices.COMPLETED:
-                raise ValidationError("Completed transfers cannot be cancelled.")
+            if transfer.status not in {
+                self.StatusChoices.PENDING,
+                self.StatusChoices.APPROVED,
+            }:
+                raise ValidationError(
+                    "Only pending or approved transfers can be cancelled."
+                )
+
+            if transfer.requested_by_id == user.id:
+                raise ValidationError("You cannot cancel your own stock transfer.")
 
             transfer.status = self.StatusChoices.CANCELLED
-            transfer.save(update_fields=["status", "updated_at"])
+
+            transfer.save(
+                update_fields=[
+                    "status",
+                    "updated_at",
+                ]
+            )
 
             self.status = transfer.status
 

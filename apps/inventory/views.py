@@ -491,8 +491,11 @@ class StockTransferViewSet(
     Read:
         view_inventory
 
-    Create/update/actions:
+    Create / ship / complete:
         manage_stock_transfers
+
+    Approve / cancel:
+        approve_stock_transfers
     """
 
     queryset = StockTransfer.objects.select_related(
@@ -531,6 +534,7 @@ class StockTransferViewSet(
         "status",
         "shipped_at",
         "delivered_at",
+        "approved_at",
     ]
 
     ordering = ["-created_at"]
@@ -540,6 +544,7 @@ class StockTransferViewSet(
             return StockTransferListSerializer
 
         if self.action in [
+            "approve",
             "mark_in_transit",
             "complete",
             "cancel",
@@ -586,6 +591,41 @@ class StockTransferViewSet(
     @action(
         detail=True,
         methods=["post"],
+        url_path="approve",
+    )
+    def approve(
+        self,
+        request,
+        pk=None,
+    ):
+        """Approve a pending stock transfer."""
+
+        transfer = self.get_object()
+
+        try:
+            transfer.approve(
+                user=request.user,
+            )
+            transfer.refresh_from_db()
+
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        response_serializer = StockTransferSerializer(
+            transfer,
+        )
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
         url_path="mark-in-transit",
     )
     def mark_in_transit(
@@ -593,9 +633,7 @@ class StockTransferViewSet(
         request,
         pk=None,
     ):
-        """
-        Mark transfer as in transit.
-        """
+        """Mark an approved transfer as in transit."""
 
         transfer = self.get_object()
 
@@ -641,7 +679,7 @@ class StockTransferViewSet(
         pk=None,
     ):
         """
-        Complete transfer.
+        Complete an in-transit transfer.
 
         Creates:
             transfer_out movement
@@ -681,14 +719,14 @@ class StockTransferViewSet(
         request,
         pk=None,
     ):
-        """
-        Cancel a transfer that has not been completed.
-        """
+        """Cancel a pending or approved stock transfer."""
 
         transfer = self.get_object()
 
         try:
-            transfer.cancel()
+            transfer.cancel(
+                user=request.user,
+            )
             transfer.refresh_from_db()
 
         except DjangoValidationError as exc:

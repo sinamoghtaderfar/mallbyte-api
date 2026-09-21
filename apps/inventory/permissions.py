@@ -40,15 +40,24 @@ class CanAccessStockTransfers(permissions.BasePermission):
     """
     Stock transfer permission policy.
 
-    Read operations require:
+    Read:
         view_inventory
 
-    Write operations require:
+    Create / ship / complete:
         manage_stock_transfers
+
+    Approve / cancel:
+        approve_stock_transfers
     """
 
     view_permission = "view_inventory"
     manage_permission = "manage_stock_transfers"
+    approve_permission = "approve_stock_transfers"
+
+    approval_actions = {
+        "approve",
+        "cancel",
+    }
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -58,6 +67,12 @@ class CanAccessStockTransfers(permissions.BasePermission):
             return has_permission(
                 request.user,
                 self.view_permission,
+            )
+
+        if view.action in self.approval_actions:
+            return has_permission(
+                request.user,
+                self.approve_permission,
             )
 
         return has_permission(

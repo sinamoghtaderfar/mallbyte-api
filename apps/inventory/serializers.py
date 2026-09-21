@@ -278,19 +278,24 @@ class StockTransferSerializer(serializers.ModelSerializer):
 
     product_name = serializers.ReadOnlyField(source="product.name")
     product_sku = serializers.ReadOnlyField(source="product.sku")
+
     from_warehouse_name = serializers.ReadOnlyField(source="from_warehouse.name")
     from_warehouse_code = serializers.ReadOnlyField(source="from_warehouse.code")
+
     to_warehouse_name = serializers.ReadOnlyField(source="to_warehouse.name")
     to_warehouse_code = serializers.ReadOnlyField(source="to_warehouse.code")
+
     status_display = serializers.CharField(
         source="get_status_display",
         read_only=True,
     )
+
     requested_by_name = serializers.ReadOnlyField(source="requested_by.full_name")
     approved_by_name = serializers.ReadOnlyField(source="approved_by.full_name")
 
     class Meta:
         model = StockTransfer
+
         fields = [
             "id",
             "from_warehouse",
@@ -313,9 +318,11 @@ class StockTransferSerializer(serializers.ModelSerializer):
             "requested_by_name",
             "approved_by",
             "approved_by_name",
+            "approved_at",
             "created_at",
             "updated_at",
         ]
+
         read_only_fields = [
             "id",
             "status",
@@ -325,6 +332,7 @@ class StockTransferSerializer(serializers.ModelSerializer):
             "requested_by_name",
             "approved_by",
             "approved_by_name",
+            "approved_at",
             "created_at",
             "updated_at",
         ]
@@ -456,6 +464,7 @@ class StockTransferListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StockTransfer
+
         fields = [
             "id",
             "product",
@@ -474,8 +483,11 @@ class StockTransferListSerializer(serializers.ModelSerializer):
             "shipped_at",
             "delivered_at",
             "reason",
+            "requested_by",
             "requested_by_name",
+            "approved_by",
             "approved_by_name",
+            "approved_at",
             "created_at",
             "updated_at",
         ]
