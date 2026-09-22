@@ -80,6 +80,34 @@ class WarehouseViewSet(viewsets.ModelViewSet):
     @action(
         detail=False,
         methods=["get"],
+        url_path="my-assignments",
+    )
+    def my_assignments(self, request):
+        """Return the active warehouses assigned to the current user."""
+
+        warehouses = Warehouse.objects.filter(
+            is_active=True,
+        )
+
+        if not request.user.is_superuser:
+            warehouses = warehouses.filter(
+                memberships__user=request.user,
+                memberships__is_active=True,
+            )
+
+        warehouse_ids = list(
+            warehouses.order_by("id").values_list("id", flat=True).distinct()
+        )
+
+        return Response(
+            {
+                "warehouse_ids": warehouse_ids,
+            }
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
         url_path="active",
     )
     def active(self, request):
@@ -484,18 +512,13 @@ class StockTransferViewSet(
     """
     Manage transfers between warehouses.
 
-    Completing a transfer creates two movements:
-        transfer_out
-        transfer_in
+    Transfer workflow:
+        create -> approve -> ship -> receive
 
-    Read:
-        view_inventory
+    Shipping creates transfer_out from the source warehouse.
+    Receiving creates transfer_in at the destination warehouse.
 
-    Create / ship / complete:
-        manage_stock_transfers
-
-    Approve / cancel:
-        approve_stock_transfers
+    Access is controlled by stock-transfer RBAC permissions.
     """
 
     queryset = StockTransfer.objects.select_related(
@@ -504,6 +527,8 @@ class StockTransferViewSet(
         "to_warehouse",
         "requested_by",
         "approved_by",
+        "shipped_by",
+        "received_by",
     ).all()
 
     permission_classes = [
@@ -533,8 +558,8 @@ class StockTransferViewSet(
         "quantity",
         "status",
         "shipped_at",
-        "delivered_at",
         "approved_at",
+        "received_at",
     ]
 
     ordering = ["-created_at"]
@@ -545,8 +570,8 @@ class StockTransferViewSet(
 
         if self.action in [
             "approve",
-            "mark_in_transit",
-            "complete",
+            "ship",
+            "receive",
             "cancel",
         ]:
             return StockTransferActionSerializer
@@ -626,14 +651,14 @@ class StockTransferViewSet(
     @action(
         detail=True,
         methods=["post"],
-        url_path="mark-in-transit",
+        url_path="ship",
     )
-    def mark_in_transit(
+    def ship(
         self,
         request,
         pk=None,
     ):
-        """Mark an approved transfer as in transit."""
+        """Ship an approved transfer from the source warehouse."""
 
         transfer = self.get_object()
 
@@ -647,7 +672,7 @@ class StockTransferViewSet(
         tracking_number = serializer.validated_data.get("tracking_number")
 
         try:
-            transfer.mark_in_transit(
+            transfer.ship(
                 user=request.user,
                 tracking_number=tracking_number,
             )
@@ -671,25 +696,19 @@ class StockTransferViewSet(
     @action(
         detail=True,
         methods=["post"],
-        url_path="complete",
+        url_path="receive",
     )
-    def complete(
+    def receive(
         self,
         request,
         pk=None,
     ):
-        """
-        Complete an in-transit transfer.
-
-        Creates:
-            transfer_out movement
-            transfer_in movement
-        """
+        """Receive an in-transit transfer at the destination warehouse."""
 
         transfer = self.get_object()
 
         try:
-            transfer.complete(
+            transfer.receive(
                 user=request.user,
             )
             transfer.refresh_from_db()

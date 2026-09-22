@@ -61,8 +61,8 @@ class InventoryPermissionTests(APITestCase):
             codename="manage_inventory",
         )
 
-        self.manage_transfers_permission = Permission.objects.get(
-            codename="manage_stock_transfers",
+        self.create_transfers_permission = Permission.objects.get(
+            codename="create_stock_transfers",
         )
 
         # Test-only roles.
@@ -184,8 +184,14 @@ class InventoryPermissionTests(APITestCase):
             {
                 "view_inventory",
                 "manage_inventory",
-                "manage_stock_transfers",
+                "create_stock_transfers",
             }.issubset(permission_codenames)
+        )
+
+        # The old broad transfer permission must not be assigned.
+        self.assertNotIn(
+            "manage_stock_transfers",
+            permission_codenames,
         )
 
     def test_superuser_can_view_inventory(self):

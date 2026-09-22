@@ -5,20 +5,11 @@ from apps.rbac.utils import has_permission
 
 class CanAccessInventory(permissions.BasePermission):
     """
-    Inventory permission policy.
+    General inventory permissions.
 
-    Read operations require:
-        view_inventory
-
-    Write operations require:
-        manage_inventory
-
-    Superusers are automatically allowed because
-    apps.rbac.utils.has_permission() already handles them.
+    Read: view_inventory
+    Write: manage_inventory
     """
-
-    view_permission = "view_inventory"
-    manage_permission = "manage_inventory"
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -27,55 +18,54 @@ class CanAccessInventory(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return has_permission(
                 request.user,
-                self.view_permission,
+                "view_inventory",
             )
 
         return has_permission(
             request.user,
-            self.manage_permission,
+            "manage_inventory",
         )
 
 
 class CanAccessStockTransfers(permissions.BasePermission):
     """
-    Stock transfer permission policy.
+    Stock transfer permissions.
 
-    Read:
-        view_inventory
-
-    Create / ship / complete:
-        manage_stock_transfers
-
-    Approve / cancel:
-        approve_stock_transfers
+    Read: view_inventory
+    Create: create_stock_transfers
+    Approve / cancel: approve_stock_transfers
+    Ship: ship_stock_transfers
+    Receive: receive_stock_transfers
     """
-
-    view_permission = "view_inventory"
-    manage_permission = "manage_stock_transfers"
-    approve_permission = "approve_stock_transfers"
-
-    approval_actions = {
-        "approve",
-        "cancel",
-    }
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
 
+        # Let DRF return 405 for unsupported methods.
+        if request.method not in view.allowed_methods:
+            return True
+
         if request.method in permissions.SAFE_METHODS:
             return has_permission(
                 request.user,
-                self.view_permission,
+                "view_inventory",
             )
 
-        if view.action in self.approval_actions:
-            return has_permission(
-                request.user,
-                self.approve_permission,
-            )
+        action_permissions = {
+            "create": "create_stock_transfers",
+            "approve": "approve_stock_transfers",
+            "cancel": "approve_stock_transfers",
+            "ship": "ship_stock_transfers",
+            "receive": "receive_stock_transfers",
+        }
+
+        required_permission = action_permissions.get(view.action)
+
+        if required_permission is None:
+            return False
 
         return has_permission(
             request.user,
-            self.manage_permission,
+            required_permission,
         )

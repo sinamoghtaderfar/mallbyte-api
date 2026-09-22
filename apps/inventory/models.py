@@ -72,6 +72,61 @@ class Warehouse(models.Model):
         super().save(*args, **kwargs)
 
 
+class WarehouseMembership(models.Model):
+    """
+    Assign a user to a warehouse.
+
+    Warehouse-level permissions such as shipping and receiving
+    are only valid for warehouses the user is assigned to.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="warehouse_memberships",
+        verbose_name="User",
+    )
+
+    warehouse = models.ForeignKey(
+        Warehouse,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+        verbose_name="Warehouse",
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="Is Active",
+    )
+
+    assigned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_warehouse_memberships",
+        verbose_name="Assigned By",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Warehouse Membership"
+        verbose_name_plural = "Warehouse Memberships"
+        ordering = ["warehouse__name", "user__email"]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "warehouse"],
+                name="unique_user_warehouse_membership",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user} → {self.warehouse}"
+
+
 class Stock(models.Model):
     """Current product stock in each warehouse."""
 
@@ -441,10 +496,10 @@ class StockTransfer(models.Model):
         blank=True,
         verbose_name="Shipped At",
     )
-    delivered_at = models.DateTimeField(
+    received_at = models.DateTimeField(
         null=True,
         blank=True,
-        verbose_name="Delivered At",
+        verbose_name="Received At",
     )
 
     # Metadata
@@ -470,7 +525,23 @@ class StockTransfer(models.Model):
         blank=True,
         verbose_name="Approved At",
     )
+    shipped_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="shipped_stock_transfers",
+        verbose_name="Shipped By",
+    )
 
+    received_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="received_stock_transfers",
+        verbose_name="Received By",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -555,48 +626,41 @@ class StockTransfer(models.Model):
 
         return self
 
-    def mark_in_transit(self, user=None, tracking_number=None):
-        """Mark an approved transfer as in transit."""
+    def ship(self, user, tracking_number=None):
+        """
+        Ship an approved transfer from the source warehouse.
+
+        Shipping performs the goods issue: stock leaves the source
+        warehouse and becomes stock in transit.
+        """
+        if user is None:
+            raise ValidationError("A shipping user is required.")
+
         with transaction.atomic():
-            transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
-
-            if transfer.status != self.StatusChoices.APPROVED:
-                raise ValidationError(
-                    "Only approved transfers can be marked as in transit."
+            transfer = (
+                StockTransfer.objects.select_for_update()
+                .select_related(
+                    "product",
+                    "from_warehouse",
+                    "to_warehouse",
                 )
-
-            transfer.status = self.StatusChoices.IN_TRANSIT
-            transfer.shipped_at = timezone.now()
-
-            if tracking_number:
-                transfer.tracking_number = tracking_number
-
-            transfer.save(
-                update_fields=[
-                    "status",
-                    "shipped_at",
-                    "tracking_number",
-                    "updated_at",
-                ]
+                .get(pk=self.pk)
             )
 
-            self.status = transfer.status
-            self.shipped_at = transfer.shipped_at
-            self.tracking_number = transfer.tracking_number
+            if transfer.status != self.StatusChoices.APPROVED:
+                raise ValidationError("Only approved transfers can be shipped.")
 
-        return self
+            if not user.is_superuser:
+                has_membership = WarehouseMembership.objects.filter(
+                    user=user,
+                    warehouse=transfer.from_warehouse,
+                    is_active=True,
+                ).exists()
 
-    def complete(self, user=None):
-        """
-        Complete transfer and create two stock movements:
-        1. transfer_out from source warehouse
-        2. transfer_in to destination warehouse
-        """
-        with transaction.atomic():
-            transfer = StockTransfer.objects.select_for_update().get(pk=self.pk)
-
-            if transfer.status != self.StatusChoices.IN_TRANSIT:
-                raise ValidationError("Only transfers in transit can be completed.")
+                if not has_membership:
+                    raise ValidationError(
+                        "You are not assigned to the source warehouse."
+                    )
 
             reference = f"transfer:{transfer.id}"
 
@@ -608,8 +672,70 @@ class StockTransfer(models.Model):
                 reference_id=reference,
                 reason=transfer.reason,
                 created_by=user,
-                notes=f"Transfer out to {transfer.to_warehouse.name}",
+                notes=f"Shipped to {transfer.to_warehouse.name}",
             )
+
+            transfer.status = self.StatusChoices.IN_TRANSIT
+            transfer.shipped_by = user
+            transfer.shipped_at = timezone.now()
+
+            if tracking_number:
+                transfer.tracking_number = tracking_number.strip()
+
+            transfer.save(
+                update_fields=[
+                    "status",
+                    "shipped_by",
+                    "shipped_at",
+                    "tracking_number",
+                    "updated_at",
+                ]
+            )
+
+            self.status = transfer.status
+            self.shipped_by = transfer.shipped_by
+            self.shipped_at = transfer.shipped_at
+            self.tracking_number = transfer.tracking_number
+
+        return self
+
+    def receive(self, user):
+        """
+        Receive an in-transit transfer at the destination warehouse.
+
+        Receiving performs the goods receipt: stock is added to the
+        destination warehouse.
+        """
+        if user is None:
+            raise ValidationError("A receiving user is required.")
+
+        with transaction.atomic():
+            transfer = (
+                StockTransfer.objects.select_for_update()
+                .select_related(
+                    "product",
+                    "from_warehouse",
+                    "to_warehouse",
+                )
+                .get(pk=self.pk)
+            )
+
+            if transfer.status != self.StatusChoices.IN_TRANSIT:
+                raise ValidationError("Only transfers in transit can be received.")
+
+            if not user.is_superuser:
+                has_membership = WarehouseMembership.objects.filter(
+                    user=user,
+                    warehouse=transfer.to_warehouse,
+                    is_active=True,
+                ).exists()
+
+                if not has_membership:
+                    raise ValidationError(
+                        "You are not assigned to the destination warehouse."
+                    )
+
+            reference = f"transfer:{transfer.id}"
 
             StockMovement.objects.create(
                 product=transfer.product,
@@ -619,22 +745,25 @@ class StockTransfer(models.Model):
                 reference_id=reference,
                 reason=transfer.reason,
                 created_by=user,
-                notes=f"Transfer in from {transfer.from_warehouse.name}",
+                notes=f"Received from {transfer.from_warehouse.name}",
             )
 
             transfer.status = self.StatusChoices.COMPLETED
-            transfer.delivered_at = timezone.now()
+            transfer.received_by = user
+            transfer.received_at = timezone.now()
 
             transfer.save(
                 update_fields=[
                     "status",
-                    "delivered_at",
+                    "received_by",
+                    "received_at",
                     "updated_at",
                 ]
             )
 
             self.status = transfer.status
-            self.delivered_at = transfer.delivered_at
+            self.received_by = transfer.received_by
+            self.received_at = transfer.received_at
 
         return self
 

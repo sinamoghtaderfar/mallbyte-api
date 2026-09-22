@@ -293,6 +293,10 @@ class StockTransferSerializer(serializers.ModelSerializer):
     requested_by_name = serializers.ReadOnlyField(source="requested_by.full_name")
     approved_by_name = serializers.ReadOnlyField(source="approved_by.full_name")
 
+    shipped_by_name = serializers.ReadOnlyField(source="shipped_by.full_name")
+
+    received_by_name = serializers.ReadOnlyField(source="received_by.full_name")
+
     class Meta:
         model = StockTransfer
 
@@ -311,8 +315,12 @@ class StockTransferSerializer(serializers.ModelSerializer):
             "status",
             "status_display",
             "tracking_number",
+            "shipped_by",
+            "shipped_by_name",
             "shipped_at",
-            "delivered_at",
+            "received_by",
+            "received_by_name",
+            "received_at",
             "reason",
             "requested_by",
             "requested_by_name",
@@ -335,6 +343,13 @@ class StockTransferSerializer(serializers.ModelSerializer):
             "approved_at",
             "created_at",
             "updated_at",
+            "tracking_number",
+            "shipped_by",
+            "shipped_by_name",
+            "shipped_at",
+            "received_by",
+            "received_by_name",
+            "received_at",
         ]
 
     def validate(self, attrs):
@@ -462,6 +477,10 @@ class StockTransferListSerializer(serializers.ModelSerializer):
     requested_by_name = serializers.ReadOnlyField(source="requested_by.full_name")
     approved_by_name = serializers.ReadOnlyField(source="approved_by.full_name")
 
+    shipped_by_name = serializers.ReadOnlyField(source="shipped_by.full_name")
+
+    received_by_name = serializers.ReadOnlyField(source="received_by.full_name")
+
     class Meta:
         model = StockTransfer
 
@@ -481,7 +500,12 @@ class StockTransferListSerializer(serializers.ModelSerializer):
             "status_display",
             "tracking_number",
             "shipped_at",
-            "delivered_at",
+            "shipped_by",
+            "shipped_by_name",
+            "shipped_at",
+            "received_by",
+            "received_by_name",
+            "received_at",
             "reason",
             "requested_by",
             "requested_by_name",
