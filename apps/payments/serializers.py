@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from apps.orders.models import Order
@@ -6,6 +7,7 @@ from apps.payments.models import Payment, PaymentEvent
 # ============================================================
 # Payment Event Serializer
 # ============================================================
+
 
 class PaymentEventSerializer(serializers.ModelSerializer):
     """
@@ -38,6 +40,7 @@ class PaymentEventSerializer(serializers.ModelSerializer):
 # ============================================================
 # Payment List Serializer
 # ============================================================
+
 
 class PaymentListSerializer(serializers.ModelSerializer):
     """
@@ -80,6 +83,7 @@ class PaymentListSerializer(serializers.ModelSerializer):
 # ============================================================
 # Payment Detail Serializer
 # ============================================================
+
 
 class PaymentDetailSerializer(serializers.ModelSerializer):
     """
@@ -136,96 +140,105 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
 # Payment Create Serializer
 # ============================================================
 
+
 class PaymentCreateSerializer(serializers.Serializer):
-    """
-    Creates a new payment attempt for an order.
-
-    Input:
-    {
-        "order": 1,
-        "provider": "mock"
-    }
-    """
-
     order = serializers.PrimaryKeyRelatedField(
         queryset=Order.objects.all(),
     )
 
+    # Real gateways need their own verified callback flow.
+    # The public demo endpoint currently supports mock only.
     provider = serializers.ChoiceField(
-        choices=Payment.ProviderChoices.choices,
+        choices=[
+            (Payment.ProviderChoices.MOCK, "Mock Payment"),
+        ],
         default=Payment.ProviderChoices.MOCK,
     )
 
     def validate_order(self, order):
-        """
-        Check if this order can be paid.
-        """
-
         request = self.context["request"]
         user = request.user
 
-        # Normal user can pay only own order.
         if not (user.is_staff or user.is_superuser):
-            if order.user_id != user.id:
-                raise serializers.ValidationError(
-                    "You cannot create payment for this order."
-                )
+            if order.user_id != user.pk:
+                raise serializers.ValidationError("You cannot pay for this order.")
 
-        if order.status == Order.StatusChoices.CANCELLED:
+        if (
+            order.status != Order.StatusChoices.PENDING_PAYMENT
+            or order.payment_status
+            not in {
+                Order.PaymentStatusChoices.UNPAID,
+                Order.PaymentStatusChoices.FAILED,
+            }
+        ):
             raise serializers.ValidationError(
-                "Cannot create payment for a cancelled order."
-            )
-
-        if order.payment_status == Order.PaymentStatusChoices.PAID:
-            raise serializers.ValidationError(
-                "Order is already paid."
+                "This order is no longer awaiting payment."
             )
 
         if order.total_amount <= 0:
-            raise serializers.ValidationError(
-                "Order total amount must be greater than zero."
-            )
+            raise serializers.ValidationError("Order total must be greater than zero.")
 
         return order
 
     def create(self, validated_data):
-        """
-        Create payment with amount copied from order total.
-        """
-
         request = self.context["request"]
-        order = validated_data["order"]
         provider = validated_data["provider"]
 
-        payment = Payment.objects.create(
-            order=order,
-            user=order.user,
-            provider=provider,
-            amount=order.total_amount,
-            currency="IRR",
-            created_by=request.user,
-        )
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=validated_data["order"].pk)
 
-        PaymentEvent.objects.create(
-            payment=payment,
-            event_type="payment_created",
-            old_status="",
-            new_status=payment.status,
-            message="Payment attempt created.",
-            created_by=request.user,
-            data={
-                "order_number": order.order_number,
-                "amount": str(payment.amount),
-                "provider": payment.provider,
-            },
-        )
+            # Recheck after obtaining the lock.
+            self.validate_order(order)
 
-        return payment
+            existing = (
+                Payment.objects.filter(
+                    order=order,
+                    provider=provider,
+                    status=Payment.StatusChoices.PENDING,
+                )
+                .order_by("-created_at", "-pk")
+                .first()
+            )
+
+            if existing:
+                if existing.amount != order.total_amount:
+                    raise serializers.ValidationError(
+                        "The active payment amount no longer "
+                        "matches the order total."
+                    )
+
+                return existing
+
+            payment = Payment.objects.create(
+                order=order,
+                user=order.user,
+                provider=provider,
+                amount=order.total_amount,
+                currency="IRR",
+                created_by=request.user,
+            )
+
+            PaymentEvent.objects.create(
+                payment=payment,
+                event_type="payment_created",
+                old_status="",
+                new_status=payment.status,
+                message="Payment attempt created.",
+                created_by=request.user,
+                data={
+                    "order_number": order.order_number,
+                    "amount": str(payment.amount),
+                    "provider": payment.provider,
+                },
+            )
+
+            return payment
 
 
 # ============================================================
 # Payment Success Serializer
 # ============================================================
+
 
 class PaymentSuccessSerializer(serializers.Serializer):
     """
@@ -255,17 +268,13 @@ class PaymentSuccessSerializer(serializers.Serializer):
     def validate(self, attrs):
         payment = self.context["payment"]
 
-        if payment.status == Payment.StatusChoices.SUCCESS:
-            raise serializers.ValidationError("Payment is already successful.")
+        if payment.provider != Payment.ProviderChoices.MOCK:
+            raise serializers.ValidationError(
+                "Only mock payments can be completed manually."
+            )
 
-        if payment.status == Payment.StatusChoices.CANCELLED:
-            raise serializers.ValidationError("Cancelled payment cannot be successful.")
-
-        if payment.status == Payment.StatusChoices.REFUNDED:
-            raise serializers.ValidationError("Refunded payment cannot be successful.")
-
-        if payment.order.status == Order.StatusChoices.CANCELLED:
-            raise serializers.ValidationError("Cannot pay a cancelled order.")
+        if payment.status != Payment.StatusChoices.PENDING:
+            raise serializers.ValidationError("Only pending payments can be completed.")
 
         return attrs
 
@@ -273,6 +282,7 @@ class PaymentSuccessSerializer(serializers.Serializer):
 # ============================================================
 # Payment Fail Serializer
 # ============================================================
+
 
 class PaymentFailSerializer(serializers.Serializer):
     """
@@ -298,14 +308,9 @@ class PaymentFailSerializer(serializers.Serializer):
     def validate(self, attrs):
         payment = self.context["payment"]
 
-        if payment.status == Payment.StatusChoices.SUCCESS:
+        if payment.status != Payment.StatusChoices.PENDING:
             raise serializers.ValidationError(
-                "Successful payment cannot be marked as failed."
-            )
-
-        if payment.status == Payment.StatusChoices.REFUNDED:
-            raise serializers.ValidationError(
-                "Refunded payment cannot be marked as failed."
+                "Only pending payments can be marked as failed."
             )
 
         return attrs
@@ -314,6 +319,7 @@ class PaymentFailSerializer(serializers.Serializer):
 # ============================================================
 # Payment Cancel Serializer
 # ============================================================
+
 
 class PaymentCancelSerializer(serializers.Serializer):
     """
@@ -334,18 +340,12 @@ class PaymentCancelSerializer(serializers.Serializer):
         payment = self.context["payment"]
 
         if payment.status == Payment.StatusChoices.SUCCESS:
-            raise serializers.ValidationError(
-                "Successful payment cannot be cancelled."
-            )
+            raise serializers.ValidationError("Successful payment cannot be cancelled.")
 
         if payment.status == Payment.StatusChoices.REFUNDED:
-            raise serializers.ValidationError(
-                "Refunded payment cannot be cancelled."
-            )
+            raise serializers.ValidationError("Refunded payment cannot be cancelled.")
 
         if payment.status == Payment.StatusChoices.CANCELLED:
-            raise serializers.ValidationError(
-                "Payment is already cancelled."
-            )
+            raise serializers.ValidationError("Payment is already cancelled.")
 
         return attrs

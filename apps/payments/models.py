@@ -7,7 +7,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.inventory.models import Stock, StockMovement
-from apps.orders.models import Order
+from apps.orders.models import Order, OrderStatusHistory
 
 
 class Payment(models.Model):
@@ -121,6 +121,11 @@ class Payment(models.Model):
                 condition=Q(amount__gt=0),
                 name="payment_amount_positive",
             ),
+            models.UniqueConstraint(
+                fields=["order"],
+                condition=Q(status="success"),
+                name="unique_successful_payment_per_order",
+            ),
         ]
 
     def __str__(self):
@@ -143,66 +148,76 @@ class Payment(models.Model):
         return f"PAY-{today}-{random_code}"
 
     def mark_success(self, gateway_reference="", gateway_response=None):
-        """
-        Mark payment as successful.
-
-        Important:
-        - Order becomes paid.
-        - Reserved stock becomes real sale movement.
-        """
+        """Complete a pending payment exactly once per order."""
 
         if gateway_response is None:
             gateway_response = {}
 
         with transaction.atomic():
+            # Always lock the order first. Cancellation and payment
+            # creation must use the same lock order.
+            order = Order.objects.select_for_update().get(pk=self.order_id)
             payment = Payment.objects.select_for_update().get(pk=self.pk)
 
-            if payment.status == self.StatusChoices.SUCCESS:
-                raise ValidationError("Payment is already successful.")
+            if payment.status != self.StatusChoices.PENDING:
+                raise ValidationError("Only pending payments can be completed.")
 
-            if payment.status in [
-                self.StatusChoices.CANCELLED,
-                self.StatusChoices.REFUNDED,
-            ]:
-                raise ValidationError("Cancelled or refunded payment cannot be marked as success.")
+            if (
+                order.status != Order.StatusChoices.PENDING_PAYMENT
+                or order.payment_status
+                not in {
+                    Order.PaymentStatusChoices.UNPAID,
+                    Order.PaymentStatusChoices.FAILED,
+                }
+            ):
+                raise ValidationError("This order is no longer awaiting payment.")
 
-            order = Order.objects.select_for_update().get(pk=payment.order_id)
+            if (
+                Payment.objects.filter(
+                    order=order,
+                    status=self.StatusChoices.SUCCESS,
+                )
+                .exclude(pk=payment.pk)
+                .exists()
+            ):
+                raise ValidationError("This order already has a successful payment.")
 
-            if order.status == Order.StatusChoices.CANCELLED:
-                raise ValidationError("Cannot pay a cancelled order.")
+            if payment.amount != order.total_amount:
+                raise ValidationError("Payment amount does not match the order total.")
 
-            # Convert reserved stock into real sale movement.
+            old_order_status = order.status
+
             for item in order.items.select_related("product", "warehouse"):
                 if not item.warehouse_id:
-                    continue
+                    raise ValidationError("The order item has no assigned warehouse.")
 
                 stock = Stock.objects.select_for_update().get(
                     product=item.product,
                     warehouse=item.warehouse,
                 )
 
-                # First release reserved quantity.
                 stock.release_reservation(
                     quantity=item.quantity,
                     user=payment.user,
                 )
 
-                # Then reduce actual stock with SALE movement.
                 StockMovement.objects.create(
                     product=item.product,
                     warehouse=item.warehouse,
                     movement_type=StockMovement.MovementType.SALE,
                     quantity=-item.quantity,
-                    reference_id=f"payment:{payment.id}",
+                    reference_id=f"payment:{payment.pk}",
                     reason=f"Order paid: {order.order_number}",
                     created_by=payment.user,
                     notes=f"Payment success: {payment.payment_number}",
                 )
 
+            now = timezone.now()
+
             payment.status = self.StatusChoices.SUCCESS
             payment.gateway_reference = gateway_reference
             payment.gateway_response = gateway_response
-            payment.paid_at = timezone.now()
+            payment.paid_at = now
             payment.save(
                 update_fields=[
                     "status",
@@ -214,6 +229,46 @@ class Payment(models.Model):
             )
 
             order.mark_paid()
+
+            OrderStatusHistory.objects.create(
+                order=order,
+                old_status=old_order_status,
+                new_status=order.status,
+                changed_by=payment.user,
+                note=f"Payment completed: {payment.payment_number}",
+            )
+
+            # Other unfinished attempts must not remain payable.
+            other_attempts = (
+                Payment.objects.select_for_update()
+                .filter(
+                    order=order,
+                    status=self.StatusChoices.PENDING,
+                )
+                .exclude(pk=payment.pk)
+            )
+
+            for other in other_attempts:
+                other.status = self.StatusChoices.CANCELLED
+                other.cancelled_at = now
+                other.failure_reason = "Another payment attempt completed this order."
+                other.save(
+                    update_fields=[
+                        "status",
+                        "cancelled_at",
+                        "failure_reason",
+                        "updated_at",
+                    ]
+                )
+
+                PaymentEvent.objects.create(
+                    payment=other,
+                    event_type="payment_cancelled",
+                    old_status=self.StatusChoices.PENDING,
+                    new_status=self.StatusChoices.CANCELLED,
+                    message=other.failure_reason,
+                    data={"successful_payment_id": payment.pk},
+                )
 
             self.status = payment.status
             self.gateway_reference = payment.gateway_reference
@@ -235,8 +290,8 @@ class Payment(models.Model):
         with transaction.atomic():
             payment = Payment.objects.select_for_update().get(pk=self.pk)
 
-            if payment.status == self.StatusChoices.SUCCESS:
-                raise ValidationError("Successful payment cannot be marked as failed.")
+            if payment.status != self.StatusChoices.PENDING:
+                raise ValidationError("Only pending payments can be marked as failed.")
 
             payment.status = self.StatusChoices.FAILED
             payment.failure_reason = reason
@@ -260,7 +315,7 @@ class Payment(models.Model):
 
     def cancel(self, reason=""):
         """
-        Cancel a pending payment.
+        Cancel a pending or failed payment attempt.
 
         This does not cancel the order.
         Order cancellation is handled in orders app.
@@ -269,11 +324,13 @@ class Payment(models.Model):
         with transaction.atomic():
             payment = Payment.objects.select_for_update().get(pk=self.pk)
 
-            if payment.status == self.StatusChoices.SUCCESS:
-                raise ValidationError("Successful payment cannot be cancelled.")
-
-            if payment.status == self.StatusChoices.REFUNDED:
-                raise ValidationError("Refunded payment cannot be cancelled.")
+            if payment.status not in {
+                self.StatusChoices.PENDING,
+                self.StatusChoices.FAILED,
+            }:
+                raise ValidationError(
+                    "Only pending or failed payments can be cancelled."
+                )
 
             payment.status = self.StatusChoices.CANCELLED
             payment.failure_reason = reason

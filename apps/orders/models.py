@@ -268,7 +268,9 @@ class Order(models.Model):
         """
         total = subtotal - discount + shipping + tax
         """
-        total = self.subtotal - self.discount_amount + self.shipping_cost + self.tax_amount
+        total = (
+            self.subtotal - self.discount_amount + self.shipping_cost + self.tax_amount
+        )
 
         if total < 0:
             total = Decimal("0")
@@ -283,79 +285,106 @@ class Order(models.Model):
         self.status = self.StatusChoices.PAID
         self.payment_status = self.PaymentStatusChoices.PAID
         self.paid_at = timezone.now()
-        self.save(update_fields=["status", "payment_status", "paid_at", "total_amount", "updated_at"])
+        self.save(
+            update_fields=[
+                "status",
+                "payment_status",
+                "paid_at",
+                "total_amount",
+                "updated_at",
+            ]
+        )
 
     def cancel(self, user=None):
-        """
-        Cancel order and release reserved stock.
-
-        When checkout happens, stock is reserved.
-        If the order is cancelled before payment/shipping,
-        the reserved stock must be released.
-        """
+        """Cancel an unpaid order and release its reservations."""
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=self.pk)
 
-            if order.status == self.StatusChoices.DELIVERED:
-                raise ValidationError("Delivered orders cannot be cancelled.")
+        if order.status == self.StatusChoices.CANCELLED:
+            raise ValidationError("Order is already cancelled.")
 
-            if order.status == self.StatusChoices.CANCELLED:
-                raise ValidationError("Order is already cancelled.")
+        if (
+            order.status != self.StatusChoices.PENDING_PAYMENT
+            or order.payment_status
+            not in {
+                self.PaymentStatusChoices.UNPAID,
+                self.PaymentStatusChoices.FAILED,
+            }
+        ):
+            raise ValidationError("Only unpaid pending orders can be cancelled.")
 
-            for item in order.items.select_related("product", "warehouse"):
-                if not item.warehouse_id:
-                    continue
+        for item in order.items.select_related("product", "warehouse"):
+            if not item.warehouse_id:
 
-                try:
-                    stock = Stock.objects.select_for_update().get(
-                        product=item.product,
-                        warehouse=item.warehouse,
-                    )
-                except Stock.DoesNotExist:
-                    continue
+                continue
 
-                stock.release_reservation(
-                    quantity=item.quantity,
-                    user=user,
-                )
-            # Release discount usage if this order used a discount.
-            # This allows the customer to use the same coupon again
-            # when usage_limit_per_user is 1 and the order is cancelled.
-            from apps.discounts.models import Discount, DiscountUsage
-
-            usage = (
-                DiscountUsage.objects
-                .select_for_update()
-                .filter(order=order)
-                .select_related("discount")
-                .first()
+            stock = Stock.objects.select_for_update().get(
+                product=item.product,
+                warehouse=item.warehouse,
             )
 
-            if usage:
-                discount_id = usage.discount_id
-                usage.delete()
+            stock.release_reservation(
+                quantity=item.quantity,
+                user=user,
+            )
 
-                Discount.objects.filter(
-                    pk=discount_id,
-                    used_count__gt=0,
-                ).update(
-                    used_count=F("used_count") - 1
-                )
+        from apps.discounts.models import Discount, DiscountUsage
+        from apps.payments.models import Payment, PaymentEvent
 
-            order.status = self.StatusChoices.CANCELLED
-            order.cancelled_at = timezone.now()
-            order.save(
+        usage = DiscountUsage.objects.select_for_update().filter(order=order).first()
+
+        if usage:
+            discount_id = usage.discount_id
+            usage.delete()
+
+            Discount.objects.filter(
+                pk=discount_id,
+                used_count__gt=0,
+            ).update(used_count=F("used_count") - 1)
+
+        now = timezone.now()
+
+        pending_payments = Payment.objects.select_for_update().filter(
+            order=order,
+            status=Payment.StatusChoices.PENDING,
+        )
+
+        for payment in pending_payments:
+            payment.status = Payment.StatusChoices.CANCELLED
+            payment.cancelled_at = now
+            payment.failure_reason = "Order cancelled."
+            payment.save(
                 update_fields=[
                     "status",
                     "cancelled_at",
-                    "total_amount",
+                    "failure_reason",
                     "updated_at",
                 ]
             )
 
-            self.status = order.status
-            self.cancelled_at = order.cancelled_at
-            self.updated_at = order.updated_at
+            PaymentEvent.objects.create(
+                payment=payment,
+                event_type="payment_cancelled",
+                old_status=Payment.StatusChoices.PENDING,
+                new_status=Payment.StatusChoices.CANCELLED,
+                message="Order cancelled.",
+                created_by=user,
+            )
+
+        order.status = self.StatusChoices.CANCELLED
+        order.cancelled_at = now
+        order.save(
+            update_fields=[
+                "status",
+                "cancelled_at",
+                "total_amount",
+                "updated_at",
+            ]
+        )
+
+        self.status = order.status
+        self.cancelled_at = order.cancelled_at
+        self.updated_at = order.updated_at
 
         return self
 
