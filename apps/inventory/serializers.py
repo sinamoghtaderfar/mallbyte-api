@@ -63,18 +63,26 @@ class WarehouseListSerializer(serializers.ModelSerializer):
 
 
 class StockSerializer(serializers.ModelSerializer):
-    """Serializer for stock records."""
+    """
+    Stock records may contain product, warehouse and location
+    metadata, but their quantities cannot be edited directly.
+
+    Physical stock changes must be recorded through movements.
+    Reservations belong to the order workflow.
+    """
 
     product_name = serializers.ReadOnlyField(source="product.name")
     product_sku = serializers.ReadOnlyField(source="product.sku")
     warehouse_name = serializers.ReadOnlyField(source="warehouse.name")
     warehouse_code = serializers.ReadOnlyField(source="warehouse.code")
+
     available_quantity = serializers.IntegerField(read_only=True)
     is_low_stock = serializers.BooleanField(read_only=True)
     updated_by_name = serializers.ReadOnlyField(source="updated_by.full_name")
 
     class Meta:
         model = Stock
+
         fields = [
             "id",
             "product",
@@ -95,8 +103,11 @@ class StockSerializer(serializers.ModelSerializer):
             "updated_by_name",
             "last_updated",
         ]
+
         read_only_fields = [
             "id",
+            "quantity",
+            "reserved_quantity",
             "available_quantity",
             "is_low_stock",
             "updated_by",
@@ -105,18 +116,37 @@ class StockSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        quantity = attrs.get("quantity", getattr(self.instance, "quantity", 0))
-        reserved_quantity = attrs.get(
-            "reserved_quantity",
-            getattr(self.instance, "reserved_quantity", 0),
-        )
+        errors = {}
 
-        if reserved_quantity > quantity:
-            raise serializers.ValidationError(
-                {
-                    "reserved_quantity": "Reserved quantity cannot be greater than total quantity."
-                }
-            )
+        # Explicitly reject forbidden fields rather than
+        # silently ignoring them.
+        for field in ("quantity", "reserved_quantity"):
+            if field in self.initial_data:
+                errors[field] = (
+                    "This field cannot be modified directly. "
+                    "Use the appropriate inventory workflow."
+                )
+
+        # An existing stock record must remain associated
+        # with its original product and warehouse.
+        if self.instance is not None:
+            if "product" in attrs and attrs["product"].pk != self.instance.product_id:
+                errors["product"] = (
+                    "The product of an existing stock " "record cannot be changed."
+                )
+
+            if (
+                "warehouse" in attrs
+                and attrs["warehouse"].pk != self.instance.warehouse_id
+            ):
+                errors["warehouse"] = (
+                    "The warehouse of an existing stock "
+                    "record cannot be changed. "
+                    "Use a stock transfer instead."
+                )
+
+        if errors:
+            raise serializers.ValidationError(errors)
 
         return attrs
 
@@ -151,20 +181,41 @@ class StockListSerializer(serializers.ModelSerializer):
 
 
 class StockMovementSerializer(serializers.ModelSerializer):
-    """Serializer for stock movements."""
+    """
+    Create auditable manual inventory movements.
+
+    Sales and warehouse transfer movements are created
+    internally by their respective business workflows.
+    """
 
     product_name = serializers.ReadOnlyField(source="product.name")
     product_sku = serializers.ReadOnlyField(source="product.sku")
     warehouse_name = serializers.ReadOnlyField(source="warehouse.name")
     warehouse_code = serializers.ReadOnlyField(source="warehouse.code")
+
     movement_type_display = serializers.CharField(
         source="get_movement_type_display",
         read_only=True,
     )
+
     created_by_name = serializers.ReadOnlyField(source="created_by.full_name")
+
+    reason = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+    MANUAL_MOVEMENT_TYPES = {
+        StockMovement.MovementType.PURCHASE,
+        StockMovement.MovementType.RETURN,
+        StockMovement.MovementType.ADJUSTMENT,
+        StockMovement.MovementType.DAMAGED,
+    }
 
     class Meta:
         model = StockMovement
+
         fields = [
             "id",
             "product",
@@ -185,6 +236,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
             "created_at",
             "notes",
         ]
+
         read_only_fields = [
             "id",
             "before_quantity",
@@ -195,11 +247,18 @@ class StockMovementSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        movement_type = attrs.get(
-            "movement_type",
-            getattr(self.instance, "movement_type", None),
-        )
-        quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
+        movement_type = attrs.get("movement_type")
+        quantity = attrs.get("quantity")
+
+        if movement_type not in self.MANUAL_MOVEMENT_TYPES:
+            raise serializers.ValidationError(
+                {
+                    "movement_type": (
+                        "This movement type cannot be created "
+                        "manually. Use its dedicated workflow."
+                    )
+                }
+            )
 
         if quantity == 0:
             raise serializers.ValidationError({"quantity": "Quantity cannot be zero."})
@@ -207,24 +266,34 @@ class StockMovementSerializer(serializers.ModelSerializer):
         increase_types = {
             StockMovement.MovementType.PURCHASE,
             StockMovement.MovementType.RETURN,
-            StockMovement.MovementType.TRANSFER_IN,
         }
 
         decrease_types = {
-            StockMovement.MovementType.SALE,
-            StockMovement.MovementType.TRANSFER_OUT,
             StockMovement.MovementType.DAMAGED,
         }
 
         if movement_type in increase_types and quantity < 0:
             raise serializers.ValidationError(
-                {"quantity": "This movement type must have a positive quantity."}
+                {"quantity": ("This movement type requires " "a positive quantity.")}
             )
 
         if movement_type in decrease_types and quantity > 0:
             raise serializers.ValidationError(
-                {"quantity": "This movement type must have a negative quantity."}
+                {"quantity": ("This movement type requires " "a negative quantity.")}
             )
+
+        reason = attrs.get("reason", "").strip()
+
+        if not reason:
+            raise serializers.ValidationError(
+                {
+                    "reason": (
+                        "A reason is required for every " "manual inventory movement."
+                    )
+                }
+            )
+
+        attrs["reason"] = reason
 
         return attrs
 

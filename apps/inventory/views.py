@@ -19,8 +19,6 @@ from apps.inventory.serializers import (
     StockListSerializer,
     StockMovementListSerializer,
     StockMovementSerializer,
-    StockReleaseReservationSerializer,
-    StockReserveSerializer,
     StockSerializer,
     StockTransferActionSerializer,
     StockTransferListSerializer,
@@ -138,17 +136,27 @@ class WarehouseViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class StockViewSet(viewsets.ModelViewSet):
+class StockViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
     """
-    Manage stock records.
-
-    Stock is stored per product per warehouse.
+    Stock record management.
 
     Read:
         view_inventory
 
-    Create/update/delete/reserve/release:
+    Create or update metadata:
         manage_inventory
+
+    Quantity changes:
+        StockMovement and internal business workflows
+
+    Direct deletion and public reservation actions
+    are intentionally unsupported.
     """
 
     queryset = Stock.objects.select_related(
@@ -193,12 +201,6 @@ class StockViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             return StockListSerializer
 
-        if self.action == "reserve":
-            return StockReserveSerializer
-
-        if self.action == "release_reservation":
-            return StockReleaseReservationSerializer
-
         return StockSerializer
 
     def get_queryset(self):
@@ -210,44 +212,26 @@ class StockViewSet(viewsets.ModelViewSet):
         in_stock = self.request.query_params.get("in_stock")
 
         if product_id:
-            queryset = queryset.filter(
-                product_id=product_id,
-            )
+            queryset = queryset.filter(product_id=product_id)
 
         if warehouse_id:
-            queryset = queryset.filter(
-                warehouse_id=warehouse_id,
-            )
+            queryset = queryset.filter(warehouse_id=warehouse_id)
 
-        if low_stock in [
-            "true",
-            "1",
-            "yes",
-        ]:
+        if low_stock in ["true", "1", "yes"]:
             queryset = queryset.filter(
                 quantity__lte=(F("low_stock_threshold") + F("reserved_quantity"))
             )
 
-        if in_stock in [
-            "true",
-            "1",
-            "yes",
-        ]:
-            queryset = queryset.filter(
-                quantity__gt=0,
-            )
+        if in_stock in ["true", "1", "yes"]:
+            queryset = queryset.filter(quantity__gt=0)
 
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(
-            updated_by=self.request.user,
-        )
+        serializer.save(updated_by=self.request.user)
 
     def perform_update(self, serializer):
-        serializer.save(
-            updated_by=self.request.user,
-        )
+        serializer.save(updated_by=self.request.user)
 
     @action(
         detail=False,
@@ -256,8 +240,8 @@ class StockViewSet(viewsets.ModelViewSet):
     )
     def low_stock(self, request):
         """
-        List stock records where available quantity
-        is below or equal to the low-stock threshold.
+        List stocks whose available quantity is
+        below or equal to the low-stock threshold.
         """
 
         queryset = self.get_queryset().filter(
@@ -272,9 +256,7 @@ class StockViewSet(viewsets.ModelViewSet):
                 many=True,
             )
 
-            return self.get_paginated_response(
-                serializer.data,
-            )
+            return self.get_paginated_response(serializer.data)
 
         serializer = StockListSerializer(
             queryset,
@@ -282,90 +264,6 @@ class StockViewSet(viewsets.ModelViewSet):
         )
 
         return Response(serializer.data)
-
-    @action(
-        detail=False,
-        methods=["post"],
-        url_path="reserve",
-    )
-    def reserve(self, request):
-        """
-        Reserve stock for an order.
-        """
-
-        serializer = StockReserveSerializer(
-            data=request.data,
-        )
-        serializer.is_valid(
-            raise_exception=True,
-        )
-
-        stock = serializer.validated_data["stock"]
-        quantity = serializer.validated_data["quantity"]
-
-        try:
-            stock.reserve(
-                quantity=quantity,
-                user=request.user,
-            )
-            stock.refresh_from_db()
-
-        except DjangoValidationError as exc:
-            return Response(
-                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        response_serializer = StockSerializer(
-            stock,
-        )
-
-        return Response(
-            response_serializer.data,
-            status=status.HTTP_200_OK,
-        )
-
-    @action(
-        detail=False,
-        methods=["post"],
-        url_path="release-reservation",
-    )
-    def release_reservation(self, request):
-        """
-        Release previously reserved stock.
-        """
-
-        serializer = StockReleaseReservationSerializer(
-            data=request.data,
-        )
-        serializer.is_valid(
-            raise_exception=True,
-        )
-
-        stock = serializer.validated_data["stock"]
-        quantity = serializer.validated_data["quantity"]
-
-        try:
-            stock.release_reservation(
-                quantity=quantity,
-                user=request.user,
-            )
-            stock.refresh_from_db()
-
-        except DjangoValidationError as exc:
-            return Response(
-                {"detail": (exc.messages if hasattr(exc, "messages") else str(exc))},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        response_serializer = StockSerializer(
-            stock,
-        )
-
-        return Response(
-            response_serializer.data,
-            status=status.HTTP_200_OK,
-        )
 
 
 class StockMovementViewSet(
