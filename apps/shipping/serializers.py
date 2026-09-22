@@ -210,10 +210,15 @@ class ShipmentCreateSerializer(serializers.Serializer):
         if not (user.is_staff or user.is_superuser):
             raise serializers.ValidationError("Only staff users can create shipments.")
 
-        if order.status != Order.StatusChoices.PAID:
-            raise serializers.ValidationError(
-                "Shipment can be created only for paid orders."
-            )
+        if (
+            order.status
+            not in {
+                Order.StatusChoices.PAID,
+                Order.StatusChoices.PROCESSING,
+            }
+            or order.payment_status != Order.PaymentStatusChoices.PAID
+        ):
+            raise serializers.ValidationError("Shipment requires a paid order.")
 
         existing_active_shipment = order.shipments.exclude(
             status__in=[

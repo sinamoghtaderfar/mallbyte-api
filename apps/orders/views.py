@@ -17,10 +17,10 @@ from apps.orders.serializers import (
     CheckoutSerializer,
     OrderDetailSerializer,
     OrderListSerializer,
+    OrderStatusUpdateSerializer,
     SellerOrderDetailSerializer,
     SellerOrderListSerializer,
     SellerOrderStatusUpdateSerializer,
-    OrderStatusUpdateSerializer,
     UpdateCartItemSerializer,
 )
 from apps.orders.services import create_order_notification
@@ -221,7 +221,6 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
 
         return OrderDetailSerializer
 
-
     def _require_seller(self, user):
         """
         Ensure current user is a seller.
@@ -250,7 +249,6 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         Retrieve one seller-visible order.
         """
         return get_object_or_404(self._get_seller_queryset(user), pk=pk)
-
 
     @action(detail=False, methods=["post"], url_path="checkout")
     def checkout(self, request):
@@ -322,7 +320,6 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         order.refresh_from_db()
         response_serializer = OrderDetailSerializer(order)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
-
 
     @action(detail=False, methods=["get"], url_path="seller")
     def seller_orders(self, request):
@@ -413,7 +410,6 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
-
     @action(
         detail=True,
         methods=["post"],
@@ -422,9 +418,15 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     )
     def update_status(self, request, pk=None):
         """
-        Admin action for changing order status.
+        Admins may move a paid order to processing.
+
+        All other status changes belong to their
+        dedicated business workflows.
         """
-        order = self.get_object()
+        visible_order = self.get_object()
+
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=visible_order.pk)
 
         serializer = OrderStatusUpdateSerializer(
             data=request.data,
@@ -437,26 +439,33 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         note = serializer.validated_data.get("note", "")
 
         order.status = new_status
-        order.save(update_fields=["status", "total_amount", "updated_at"])
+        order.save(
+            update_fields=[
+                "status",
+                "total_amount",
+                "updated_at",
+            ]
+        )
 
         OrderStatusHistory.objects.create(
             order=order,
             old_status=old_status,
             new_status=new_status,
             changed_by=request.user,
-            note=note,
+            note=note or "Order preparation started.",
         )
 
-        order.refresh_from_db()
-        if new_status != Order.StatusChoices.PAID:
-            create_order_notification(
-                order=order,
-                template_key="order_status_updated",
-                order_id=order.order_number,
-                status_display=order.get_status_display(),
-                metadata={
-                    "status": order.status,
-                },
-            )
+        create_order_notification(
+            order=order,
+            template_key="order_status_updated",
+            order_id=order.order_number,
+            status_display=order.get_status_display(),
+            metadata={"status": order.status},
+        )
+
         response_serializer = OrderDetailSerializer(order)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )

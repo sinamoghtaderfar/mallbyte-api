@@ -9,6 +9,7 @@ from apps.accounts.models import User
 from apps.inventory.models import Stock, Warehouse
 from apps.notifications.models import Notification
 from apps.orders.models import Cart, CartItem, Order
+from apps.payments.models import Payment
 from apps.products.models import Category, Product
 
 
@@ -177,6 +178,15 @@ class OrderNotificationTests(APITestCase):
     def test_admin_status_update_creates_order_status_notification(self):
         order = self.checkout_order()
 
+        # Complete payment before processing the order.
+        payment = Payment.objects.create(
+            order=order,
+            user=self.customer,
+            provider=Payment.ProviderChoices.MOCK,
+            amount=order.total_amount,
+        )
+        payment.mark_success()
+
         self.authenticate_admin()
 
         url = reverse("order-update-status", args=[order.pk])
@@ -190,18 +200,25 @@ class OrderNotificationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+            response.data,
+        )
 
         order.refresh_from_db()
 
-        self.assertEqual(order.status, Order.StatusChoices.PROCESSING)
+        self.assertEqual(
+            order.status,
+            Order.StatusChoices.PROCESSING,
+        )
 
         self.assert_order_notification_exists(
             order=order,
             title="Order status updated",
         )
 
-    def test_paid_status_update_does_not_create_order_notification(self):
+    def test_admin_cannot_mark_unpaid_order_paid(self):
         order = self.checkout_order()
 
         self.authenticate_admin()
@@ -220,12 +237,27 @@ class OrderNotificationTests(APITestCase):
             url,
             data={
                 "status": Order.StatusChoices.PAID,
-                "note": "Payment status will be handled by payments app.",
+                "note": "Payment must be handled by the payments app.",
             },
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        order.refresh_from_db()
+
+        self.assertEqual(
+            order.status,
+            Order.StatusChoices.PENDING_PAYMENT,
+        )
+
+        self.assertEqual(
+            order.payment_status,
+            Order.PaymentStatusChoices.UNPAID,
+        )
 
         after_count = Notification.objects.filter(
             user=self.customer,

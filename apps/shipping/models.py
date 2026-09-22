@@ -147,8 +147,15 @@ class Shipment(models.Model):
         should stay unchanged even if user changes profile later.
         """
 
-        if order.status != Order.StatusChoices.PAID:
-            raise ValidationError("Shipment can be created only for paid orders.")
+        if (
+            order.status
+            not in {
+                Order.StatusChoices.PAID,
+                Order.StatusChoices.PROCESSING,
+            }
+            or order.payment_status != Order.PaymentStatusChoices.PAID
+        ):
+            raise ValidationError("Shipment requires a paid order.")
 
         shipment = cls.objects.create(
             order=order,
@@ -175,29 +182,51 @@ class Shipment(models.Model):
         return shipment
 
     def mark_ready(self, user=None, note=""):
-        """
-        Mark shipment as ready to ship.
-        """
-
+        """Mark shipment ready and start order processing."""
         with transaction.atomic():
             shipment = Shipment.objects.select_for_update().get(pk=self.pk)
 
-            if shipment.status != self.StatusChoices.PENDING:
-                raise ValidationError("Only pending shipments can be marked as ready.")
+        if shipment.status != self.StatusChoices.PENDING:
+            raise ValidationError("Only pending shipments can be marked as ready.")
 
-            old_status = shipment.status
-            shipment.status = self.StatusChoices.READY_TO_SHIP
-            shipment.save(update_fields=["status", "updated_at"])
+        old_status = shipment.status
+        shipment.status = self.StatusChoices.READY_TO_SHIP
+        shipment.save(update_fields=["status", "updated_at"])
 
-            ShipmentEvent.objects.create(
-                shipment=shipment,
-                old_status=old_status,
-                new_status=shipment.status,
-                message=note or "Shipment is ready to ship.",
-                created_by=user,
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            old_status=old_status,
+            new_status=shipment.status,
+            message=note or "Shipment is ready to ship.",
+            created_by=user,
+        )
+
+        order = Order.objects.select_for_update().get(pk=shipment.order_id)
+
+        if order.status == Order.StatusChoices.PAID:
+            old_order_status = order.status
+
+            order.status = Order.StatusChoices.PROCESSING
+            order.save(
+                update_fields=[
+                    "status",
+                    "total_amount",
+                    "updated_at",
+                ]
             )
 
-            self.status = shipment.status
+            OrderStatusHistory.objects.create(
+                order=order,
+                old_status=old_order_status,
+                new_status=order.status,
+                changed_by=user,
+                note=(f"Shipment ready: " f"{shipment.shipment_number}"),
+            )
+
+        elif order.status != Order.StatusChoices.PROCESSING:
+            raise ValidationError("This order cannot enter the preparation stage.")
+
+        self.status = shipment.status
 
         return self
 
@@ -215,7 +244,9 @@ class Shipment(models.Model):
                 self.StatusChoices.PENDING,
                 self.StatusChoices.READY_TO_SHIP,
             ]:
-                raise ValidationError("Shipment cannot be marked as shipped from this status.")
+                raise ValidationError(
+                    "Shipment cannot be marked as shipped from this status."
+                )
 
             old_status = shipment.status
 
@@ -288,7 +319,9 @@ class Shipment(models.Model):
             old_order_status = order.status
             order.status = Order.StatusChoices.DELIVERED
             order.delivered_at = shipment.delivered_at
-            order.save(update_fields=["status", "delivered_at", "total_amount", "updated_at"])
+            order.save(
+                update_fields=["status", "delivered_at", "total_amount", "updated_at"]
+            )
 
             ShipmentEvent.objects.create(
                 shipment=shipment,
@@ -389,4 +422,6 @@ class ShipmentEvent(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.shipment.shipment_number}: {self.old_status} -> {self.new_status}"
+        return (
+            f"{self.shipment.shipment_number}: {self.old_status} -> {self.new_status}"
+        )

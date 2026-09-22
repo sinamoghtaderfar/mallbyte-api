@@ -174,7 +174,13 @@ class ShipmentViewSet(
 
         orders = (
             Order.objects.select_related("user")
-            .filter(status=Order.StatusChoices.PAID)
+            .filter(
+                status__in=[
+                    Order.StatusChoices.PAID,
+                    Order.StatusChoices.PROCESSING,
+                ],
+                payment_status=Order.PaymentStatusChoices.PAID,
+            )
             .annotate(
                 has_active_shipment=Exists(active_shipments),
             )

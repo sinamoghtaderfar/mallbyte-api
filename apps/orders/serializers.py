@@ -324,7 +324,6 @@ class OrderDetailSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-
 # ============================================================
 # Seller Order Serializers
 # ============================================================
@@ -480,10 +479,7 @@ class SellerOrderDetailSerializer(serializers.ModelSerializer):
 
     def get_seller_total_amount(self, obj):
         return sum(
-            (
-                item.total_price
-                for item in self._seller_items_queryset(obj)
-            ),
+            (item.total_price for item in self._seller_items_queryset(obj)),
             Decimal("0"),
         )
 
@@ -534,12 +530,9 @@ class SellerOrderStatusUpdateSerializer(serializers.Serializer):
         allowed_next_statuses = self.allowed_transitions.get(order.status, set())
 
         if new_status not in allowed_next_statuses:
-            raise serializers.ValidationError(
-                "Invalid seller order status transition."
-            )
+            raise serializers.ValidationError("Invalid seller order status transition.")
 
         return new_status
-
 
 
 # ============================================================
@@ -748,31 +741,38 @@ class CheckoutSerializer(serializers.Serializer):
 
 class OrderStatusUpdateSerializer(serializers.Serializer):
     """
-    Admin serializer for changing order status.
+    Admins can start processing an already-paid order.
 
-    Input:
-    {
-        "status": "processing",
-        "note": "Order is being prepared"
-    }
+    Payment, shipping, cancellation and refund statuses
+    must be managed by their dedicated workflows.
     """
 
-    status = serializers.ChoiceField(choices=Order.StatusChoices.choices)
-    note = serializers.CharField(required=False, allow_blank=True)
+    status = serializers.ChoiceField(
+        choices=[
+            (
+                Order.StatusChoices.PROCESSING,
+                "Processing",
+            ),
+        ],
+    )
+
+    note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
 
     def validate_status(self, new_status):
         order = self.context.get("order")
 
-        if not order:
-            return new_status
+        if order is None:
+            raise serializers.ValidationError("Order is required.")
 
-        if order.status == Order.StatusChoices.CANCELLED:
-            raise serializers.ValidationError("Cancelled orders cannot be changed.")
-
-        if order.status == Order.StatusChoices.DELIVERED:
-            raise serializers.ValidationError("Delivered orders cannot be changed.")
-
-        if order.status == new_status:
-            raise serializers.ValidationError("Order already has this status.")
+        if (
+            order.status != Order.StatusChoices.PAID
+            or order.payment_status != Order.PaymentStatusChoices.PAID
+        ):
+            raise serializers.ValidationError(
+                "Only paid orders can be marked as processing."
+            )
 
         return new_status

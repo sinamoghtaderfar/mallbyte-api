@@ -184,6 +184,19 @@ class OrderNotificationPreferenceIntegrationTests(APITestCase):
     def test_muted_order_type_blocks_order_status_updated_notification(self):
         order = self.checkout_order()
 
+        # Prepare a paid order for this notification test.
+        order.status = Order.StatusChoices.PAID
+
+        order.payment_status = Order.PaymentStatusChoices.PAID
+        order.save(
+            update_fields=[
+                "status",
+                "payment_status",
+                "total_amount",
+                "updated_at",
+            ]
+        )
+
         self.authenticate_admin()
 
         url = reverse("order-update-status", args=[order.pk])
@@ -197,11 +210,18 @@ class OrderNotificationPreferenceIntegrationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+            response.data,
+        )
 
         order.refresh_from_db()
 
-        self.assertEqual(order.status, Order.StatusChoices.PROCESSING)
+        self.assertEqual(
+            order.status,
+            Order.StatusChoices.PROCESSING,
+        )
 
         self.assert_order_notification_does_not_exist(
             order=order,
