@@ -1,22 +1,19 @@
+"""Serializers for order-level and seller-specific shipments."""
+
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from apps.orders.models import Order
+from apps.orders.models import Order, SellerOrderFulfillment
 from apps.shipping.models import Shipment, ShipmentEvent
 
-# ============================================================
-# Shipment Event Serializer
-# ============================================================
+ACTIVE_SHIPMENT_EXCLUDED_STATUSES = (
+    Shipment.StatusChoices.CANCELLED,
+    Shipment.StatusChoices.RETURNED,
+)
 
 
 class ShipmentEventSerializer(serializers.ModelSerializer):
-    """
-    Shows shipment status history.
-
-    Example:
-    pending -> ready_to_ship
-    ready_to_ship -> shipped
-    shipped -> delivered
-    """
+    """Show the history of a shipment's status changes."""
 
     created_by_name = serializers.ReadOnlyField(source="created_by.full_name")
 
@@ -36,14 +33,12 @@ class ShipmentEventSerializer(serializers.ModelSerializer):
 
 
 class EligibleShipmentOrderSerializer(serializers.ModelSerializer):
-    """
-    Small order serializer for the admin shipment creation screen.
-
-    Returns only paid orders that are eligible for shipment creation.
-    """
+    """Paid orders with sellers who can still receive a shipment."""
 
     user_email = serializers.ReadOnlyField(source="user.email")
     user_full_name = serializers.ReadOnlyField(source="user.full_name")
+    eligible_sellers = serializers.SerializerMethodField()
+    requires_seller_selection = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -61,32 +56,92 @@ class EligibleShipmentOrderSerializer(serializers.ModelSerializer):
             "city",
             "paid_at",
             "created_at",
+            "eligible_sellers",
+            "requires_seller_selection",
         ]
         read_only_fields = fields
 
+    @staticmethod
+    def _seller_ids(obj):
+        return list(obj.items.values_list("product__seller_id", flat=True).distinct())
 
-# ============================================================
-# Shipment List Serializer
-# ============================================================
+    def get_requires_seller_selection(self, obj):
+        return len(self._seller_ids(obj)) > 1
+
+    def get_eligible_sellers(self, obj):
+        # Older orders may not contain order items. They retain the legacy
+        # order-level shipment workflow and therefore have no seller selector.
+        if obj.payment_status != Order.PaymentStatusChoices.PAID:
+            return []
+
+        active_shipments = Shipment.objects.filter(order=obj).exclude(
+            status__in=ACTIVE_SHIPMENT_EXCLUDED_STATUSES
+        )
+        if active_shipments.filter(seller_fulfillment__isnull=True).exists():
+            return []
+
+        already_assigned = set(
+            active_shipments.values_list("seller_fulfillment__seller_id", flat=True)
+        )
+        statuses = dict(
+            SellerOrderFulfillment.objects.filter(order=obj).values_list(
+                "seller_id", "status"
+            )
+        )
+        sellers = {}
+        for item in obj.items.select_related("product__seller"):
+            seller = item.product.seller
+            if seller.pk in sellers or seller.pk in already_assigned:
+                continue
+            fulfillment_status = statuses.get(seller.pk, Order.StatusChoices.PAID)
+            if fulfillment_status not in {
+                Order.StatusChoices.PAID,
+                Order.StatusChoices.PROCESSING,
+            }:
+                continue
+            sellers[seller.pk] = {
+                "id": seller.pk,
+                "name": seller.full_name or seller.email or str(seller.pk),
+                "status": fulfillment_status,
+            }
+        return list(sellers.values())
 
 
-class ShipmentListSerializer(serializers.ModelSerializer):
-    """
-    Small serializer for shipment list.
-    """
+class SellerShipmentFieldsMixin:
+    """Seller-specific fields shared by shipment list and detail responses."""
 
+    @staticmethod
+    def _fulfillment(obj):
+        return obj.seller_fulfillment
+
+    def get_seller(self, obj):
+        fulfillment = self._fulfillment(obj)
+        return fulfillment.seller_id if fulfillment else None
+
+    def get_seller_name(self, obj):
+        fulfillment = self._fulfillment(obj)
+        if not fulfillment:
+            return None
+        seller = fulfillment.seller
+        return seller.full_name or seller.email or str(seller.pk)
+
+    def get_seller_status(self, obj):
+        fulfillment = self._fulfillment(obj)
+        return fulfillment.status if fulfillment else None
+
+
+class ShipmentListSerializer(SellerShipmentFieldsMixin, serializers.ModelSerializer):
+    """Small shipment serializer for the shipment list."""
+
+    seller = serializers.SerializerMethodField()
+    seller_name = serializers.SerializerMethodField()
+    seller_status = serializers.SerializerMethodField()
     order_number = serializers.ReadOnlyField(source="order.order_number")
     user_email = serializers.ReadOnlyField(source="user.email")
-
     carrier_display = serializers.CharField(
-        source="get_carrier_display",
-        read_only=True,
+        source="get_carrier_display", read_only=True
     )
-
-    status_display = serializers.CharField(
-        source="get_status_display",
-        read_only=True,
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = Shipment
@@ -97,6 +152,10 @@ class ShipmentListSerializer(serializers.ModelSerializer):
             "order_number",
             "user",
             "user_email",
+            "seller_fulfillment",
+            "seller",
+            "seller_name",
+            "seller_status",
             "carrier",
             "carrier_display",
             "status",
@@ -110,30 +169,19 @@ class ShipmentListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-# ============================================================
-# Shipment Detail Serializer
-# ============================================================
+class ShipmentDetailSerializer(SellerShipmentFieldsMixin, serializers.ModelSerializer):
+    """Full shipment detail including seller and shipment events."""
 
-
-class ShipmentDetailSerializer(serializers.ModelSerializer):
-    """
-    Full shipment detail with shipment events.
-    """
-
+    seller = serializers.SerializerMethodField()
+    seller_name = serializers.SerializerMethodField()
+    seller_status = serializers.SerializerMethodField()
     order_number = serializers.ReadOnlyField(source="order.order_number")
     user_email = serializers.ReadOnlyField(source="user.email")
     user_full_name = serializers.ReadOnlyField(source="user.full_name")
-
     carrier_display = serializers.CharField(
-        source="get_carrier_display",
-        read_only=True,
+        source="get_carrier_display", read_only=True
     )
-
-    status_display = serializers.CharField(
-        source="get_status_display",
-        read_only=True,
-    )
-
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     events = ShipmentEventSerializer(many=True, read_only=True)
 
     class Meta:
@@ -146,6 +194,10 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
             "user",
             "user_email",
             "user_full_name",
+            "seller_fulfillment",
+            "seller",
+            "seller_name",
+            "seller_status",
             "carrier",
             "carrier_display",
             "status",
@@ -171,26 +223,15 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-# ============================================================
-# Shipment Create Serializer
-# ============================================================
-
-
 class ShipmentCreateSerializer(serializers.Serializer):
-    """
-    Creates shipment from a paid order.
+    """Create a shipment for one seller (or a legacy order without items).
 
-    Input:
-    {
-        "order": 1,
-        "carrier": "dhl"
-    }
+    Single-seller input: {"order": 1, "carrier": "dhl"}
+    Multi-seller input:  {"order": 1, "seller": 5, "carrier": "dhl"}
     """
 
-    order = serializers.PrimaryKeyRelatedField(
-        queryset=Order.objects.all(),
-    )
-
+    order = serializers.PrimaryKeyRelatedField(queryset=Order.objects.all())
+    seller = serializers.IntegerField(min_value=1, required=False)
     carrier = serializers.ChoiceField(
         choices=Shipment.CarrierChoices.choices,
         required=False,
@@ -198,18 +239,9 @@ class ShipmentCreateSerializer(serializers.Serializer):
     )
 
     def validate_order(self, order):
-        """
-        Shipment can be created only for paid orders.
-        """
-
-        request = self.context["request"]
-        user = request.user
-
-        # Normal users cannot create shipments for other users.
-        # Later, admin/order-manager permissions can be added here.
+        user = self.context["request"].user
         if not (user.is_staff or user.is_superuser):
             raise serializers.ValidationError("Only staff users can create shipments.")
-
         if (
             order.status
             not in {
@@ -219,184 +251,138 @@ class ShipmentCreateSerializer(serializers.Serializer):
             or order.payment_status != Order.PaymentStatusChoices.PAID
         ):
             raise serializers.ValidationError("Shipment requires a paid order.")
-
-        existing_active_shipment = order.shipments.exclude(
-            status__in=[
-                Shipment.StatusChoices.CANCELLED,
-                Shipment.StatusChoices.RETURNED,
-            ]
-        ).exists()
-
-        if existing_active_shipment:
-            raise serializers.ValidationError(
-                "This order already has an active shipment."
-            )
-
         return order
 
-    def create(self, validated_data):
-        """
-        Create shipment using model helper.
-        """
-
-        request = self.context["request"]
-
-        order = validated_data["order"]
-        carrier = validated_data.get("carrier", Shipment.CarrierChoices.POST)
-
-        shipment = Shipment.create_from_order(
-            order=order,
-            carrier=carrier,
-            created_by=request.user,
+    def validate(self, attrs):
+        order = attrs["order"]
+        seller_id = attrs.get("seller")
+        seller_ids = set(
+            order.items.values_list("product__seller_id", flat=True).distinct()
+        )
+        active_shipments = Shipment.objects.filter(order=order).exclude(
+            status__in=ACTIVE_SHIPMENT_EXCLUDED_STATUSES
         )
 
-        return shipment
+        # A legacy, order-wide shipment cannot coexist with seller shipments.
+        if active_shipments.filter(seller_fulfillment__isnull=True).exists():
+            raise serializers.ValidationError(
+                {"order": "This order already has an active shipment."}
+            )
 
+        if not seller_ids:
+            if seller_id is not None:
+                raise serializers.ValidationError(
+                    {"seller": "This order has no seller items."}
+                )
+            if active_shipments.exists():
+                raise serializers.ValidationError(
+                    {"order": "This order already has an active shipment."}
+                )
+            return attrs
 
-# ============================================================
-# Mark Ready Serializer
-# ============================================================
+        if seller_id is None:
+            if len(seller_ids) > 1:
+                raise serializers.ValidationError(
+                    {"seller": "Choose a seller for this multi-seller order."}
+                )
+            seller_id = next(iter(seller_ids))
+            attrs["seller"] = seller_id
+        elif seller_id not in seller_ids:
+            raise serializers.ValidationError(
+                {"seller": "This seller has no items in the order."}
+            )
+
+        if active_shipments.filter(seller_fulfillment__seller_id=seller_id).exists():
+            raise serializers.ValidationError(
+                {"seller": "This seller already has an active shipment."}
+            )
+
+        seller_status = (
+            SellerOrderFulfillment.objects.filter(order=order, seller_id=seller_id)
+            .values_list("status", flat=True)
+            .first()
+        )
+        if seller_status is not None and seller_status not in {
+            Order.StatusChoices.PAID,
+            Order.StatusChoices.PROCESSING,
+        }:
+            raise serializers.ValidationError(
+                {"seller": "This seller's order cannot enter shipping."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        try:
+            return Shipment.create_from_order(
+                order=validated_data["order"],
+                seller=validated_data.get("seller"),
+                carrier=validated_data.get("carrier", Shipment.CarrierChoices.POST),
+                created_by=request.user,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)}
+            ) from exc
 
 
 class ShipmentMarkReadySerializer(serializers.Serializer):
-    """
-    Mark shipment as ready to ship.
-
-    Input:
-    {
-        "note": "Package prepared"
-    }
-    """
-
-    note = serializers.CharField(
-        required=False,
-        allow_blank=True,
-    )
+    note = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
         shipment = self.context["shipment"]
-
         if shipment.status != Shipment.StatusChoices.PENDING:
             raise serializers.ValidationError(
                 "Only pending shipments can be marked as ready."
             )
-
         return attrs
-
-
-# ============================================================
-# Mark Shipped Serializer
-# ============================================================
 
 
 class ShipmentMarkShippedSerializer(serializers.Serializer):
-    """
-    Mark shipment as shipped.
-
-    Input:
-    {
-        "tracking_number": "DHL123456",
-        "tracking_url": "https://...",
-        "note": "Handed to carrier"
-    }
-    """
-
     tracking_number = serializers.CharField(
-        max_length=120,
-        required=False,
-        allow_blank=True,
+        max_length=120, required=False, allow_blank=True
     )
-
-    tracking_url = serializers.URLField(
-        required=False,
-        allow_blank=True,
-    )
-
-    note = serializers.CharField(
-        required=False,
-        allow_blank=True,
-    )
+    tracking_url = serializers.URLField(required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
         shipment = self.context["shipment"]
-
-        allowed_statuses = [
+        if shipment.status not in {
             Shipment.StatusChoices.PENDING,
             Shipment.StatusChoices.READY_TO_SHIP,
-        ]
-
-        if shipment.status not in allowed_statuses:
+        }:
             raise serializers.ValidationError(
                 "Shipment cannot be marked as shipped from this status."
             )
-
         return attrs
-
-
-# ============================================================
-# Mark Delivered Serializer
-# ============================================================
 
 
 class ShipmentMarkDeliveredSerializer(serializers.Serializer):
-    """
-    Mark shipment as delivered.
-
-    Input:
-    {
-        "note": "Delivered to customer"
-    }
-    """
-
-    note = serializers.CharField(
-        required=False,
-        allow_blank=True,
-    )
+    note = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
         shipment = self.context["shipment"]
-
-        allowed_statuses = [
+        if shipment.status not in {
             Shipment.StatusChoices.SHIPPED,
             Shipment.StatusChoices.IN_TRANSIT,
             Shipment.StatusChoices.OUT_FOR_DELIVERY,
-        ]
-
-        if shipment.status not in allowed_statuses:
+        }:
             raise serializers.ValidationError(
-                "Shipment cannot be marked as delivered from this status."
+                "Shipment cannot be delivered from this status."
             )
-
         return attrs
 
 
-# ============================================================
-# Shipment Cancel Serializer
-# ============================================================
-
-
 class ShipmentCancelSerializer(serializers.Serializer):
-    """
-    Cancel shipment.
-
-    Input:
-    {
-        "note": "Customer requested cancellation"
-    }
-    """
-
-    note = serializers.CharField(
-        required=False,
-        allow_blank=True,
-    )
+    note = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
         shipment = self.context["shipment"]
-
-        if shipment.status == Shipment.StatusChoices.DELIVERED:
-            raise serializers.ValidationError("Delivered shipment cannot be cancelled.")
-
-        if shipment.status == Shipment.StatusChoices.CANCELLED:
-            raise serializers.ValidationError("Shipment is already cancelled.")
-
+        if shipment.status in {
+            Shipment.StatusChoices.DELIVERED,
+            Shipment.StatusChoices.CANCELLED,
+        }:
+            raise serializers.ValidationError(
+                "Delivered or already cancelled shipments cannot be cancelled."
+            )
         return attrs

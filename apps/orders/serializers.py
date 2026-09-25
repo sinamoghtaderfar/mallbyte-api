@@ -525,7 +525,12 @@ class SellerOrderDetailSerializer(
 
 
 class SellerOrderStatusUpdateSerializer(serializers.Serializer):
-    """Validate a transition of the seller's own fulfillment, not the order."""
+    """Allow sellers to start preparation; Shipping owns dispatch and delivery.
+
+    Sellers may change their paid fulfillment to processing. Shipped and
+    delivered must be recorded via the shipment workflow so a seller cannot
+    bypass the creation and tracking of their actual shipment.
+    """
 
     status = serializers.ChoiceField(
         choices=[
@@ -533,23 +538,9 @@ class SellerOrderStatusUpdateSerializer(serializers.Serializer):
                 Order.StatusChoices.PROCESSING,
                 Order.StatusChoices.PROCESSING.label,
             ),
-            (
-                Order.StatusChoices.SHIPPED,
-                Order.StatusChoices.SHIPPED.label,
-            ),
-            (
-                Order.StatusChoices.DELIVERED,
-                Order.StatusChoices.DELIVERED.label,
-            ),
         ],
     )
     note = serializers.CharField(required=False, allow_blank=True)
-
-    allowed_transitions = {
-        Order.StatusChoices.PAID: {Order.StatusChoices.PROCESSING},
-        Order.StatusChoices.PROCESSING: {Order.StatusChoices.SHIPPED},
-        Order.StatusChoices.SHIPPED: {Order.StatusChoices.DELIVERED},
-    }
 
     def validate_status(self, new_status):
         order = self.context.get("order")
@@ -576,10 +567,10 @@ class SellerOrderStatusUpdateSerializer(serializers.Serializer):
                 "This order cannot be changed by the seller."
             )
 
-        allowed = self.allowed_transitions.get(fulfillment.status, set())
-        if new_status not in allowed:
+        if fulfillment.status != Order.StatusChoices.PAID:
             raise serializers.ValidationError(
-                "Invalid seller fulfillment status transition."
+                "Only paid seller fulfillments can be marked as processing. "
+                "Shipping manages subsequent status changes."
             )
 
         return new_status

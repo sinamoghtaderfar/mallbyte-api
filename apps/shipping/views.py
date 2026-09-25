@@ -1,14 +1,4 @@
-# Create shipment from paid order
-# List shipments
-# Retrieve shipment detail
-# List eligible paid orders for shipment creation
-# Mark ready
-# Mark shipped
-# Mark delivered
-# Cancel shipment
-
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Exists, OuterRef
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -35,18 +25,17 @@ class ShipmentViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    """
-    Shipment API.
+    """Create and manage shipments without mixing sellers in an order.
 
-    Main endpoints:
-    - GET    /api/shipping/shipments/
-    - POST   /api/shipping/shipments/
-    - GET    /api/shipping/shipments/eligible-orders/
-    - GET    /api/shipping/shipments/{id}/
-    - POST   /api/shipping/shipments/{id}/mark-ready/
-    - POST   /api/shipping/shipments/{id}/mark-shipped/
-    - POST   /api/shipping/shipments/{id}/mark-delivered/
-    - POST   /api/shipping/shipments/{id}/cancel/
+    Endpoints:
+      GET  /api/shipping/shipments/
+      POST /api/shipping/shipments/
+      GET  /api/shipping/shipments/eligible-orders/
+      GET  /api/shipping/shipments/{id}/
+      POST /api/shipping/shipments/{id}/mark-ready/
+      POST /api/shipping/shipments/{id}/mark-shipped/
+      POST /api/shipping/shipments/{id}/mark-delivered/
+      POST /api/shipping/shipments/{id}/cancel/
     """
 
     permission_classes = [IsAuthenticated]
@@ -55,27 +44,24 @@ class ShipmentViewSet(
         "order",
         "user",
         "created_by",
-    ).prefetch_related(
-        "events",
-    )
+        "seller_fulfillment",
+        "seller_fulfillment__seller",
+    ).prefetch_related("events")
 
-    filter_backends = [
-        filters.SearchFilter,
-        filters.OrderingFilter,
-    ]
-
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         "shipment_number",
         "order__order_number",
         "user__phone",
         "user__email",
+        "seller_fulfillment__seller__email",
+        "seller_fulfillment__seller__full_name",
         "tracking_number",
         "receiver_name",
         "receiver_phone",
         "city",
         "postal_code",
     ]
-
     ordering_fields = [
         "created_at",
         "updated_at",
@@ -83,97 +69,72 @@ class ShipmentViewSet(
         "delivered_at",
         "status",
     ]
-
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        """
-        Staff users can see all shipments.
-        Normal users can see only their own shipments.
-        """
-
-        user = self.request.user
+        """Staff can see every shipment; buyers only their own shipments."""
         queryset = super().get_queryset()
-
+        user = self.request.user
         if user.is_staff or user.is_superuser:
             return queryset
-
         return queryset.filter(user=user)
 
     def get_serializer_class(self):
-        """
-        Choose serializer based on action.
-        """
-
         if self.action == "list":
             return ShipmentListSerializer
-
         if self.action == "eligible_orders":
             return EligibleShipmentOrderSerializer
-
         if self.action == "create":
             return ShipmentCreateSerializer
-
         if self.action == "mark_ready":
             return ShipmentMarkReadySerializer
-
         if self.action == "mark_shipped":
             return ShipmentMarkShippedSerializer
-
         if self.action == "mark_delivered":
             return ShipmentMarkDeliveredSerializer
-
         if self.action == "cancel":
             return ShipmentCancelSerializer
-
         return ShipmentDetailSerializer
 
-    def _is_staff_user(self, user):
-        """
-        Check whether user can manage shipments.
-        Later we can replace this with RBAC permission.
-        """
-
+    @staticmethod
+    def _is_staff_user(user):
         return user.is_staff or user.is_superuser
 
-    def _staff_required_response(self):
-        """
-        Response for users who are not allowed to manage shipments.
-        """
-
+    @staticmethod
+    def _staff_required_response():
         return Response(
             {"detail": "Only staff users can manage shipments."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    @action(
-        detail=False,
-        methods=["get"],
-        url_path="eligible-orders",
-    )
+    @staticmethod
+    def _validation_error_response(exc):
+        return Response(
+            {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    @staticmethod
+    def _notify(shipment, template_key):
+        create_shipment_notification(
+            shipment=shipment,
+            template_key=template_key,
+            order_id=shipment.order.order_number,
+        )
+
+    @action(detail=False, methods=["get"], url_path="eligible-orders")
     def eligible_orders(self, request):
+        """Paid orders with at least one seller lacking an active shipment.
+
+        A multi-seller order remains eligible after its first seller receives a
+        shipment. Older orders without order items retain the one-shipment rule.
         """
-        Return paid orders that do not already have an active shipment.
-
-        An active shipment is any shipment that is not cancelled or returned.
-
-        GET /api/shipping/shipments/eligible-orders/
-        """
-
         if not self._is_staff_user(request.user):
             return self._staff_required_response()
 
-        active_shipments = Shipment.objects.filter(
-            order_id=OuterRef("pk"),
-        ).exclude(
-            status__in=[
-                Shipment.StatusChoices.CANCELLED,
-                Shipment.StatusChoices.RETURNED,
-            ],
-        )
-
         orders = (
             Order.objects.select_related("user")
+            .prefetch_related("items__product__seller", "seller_fulfillments")
             .filter(
                 status__in=[
                     Order.StatusChoices.PAID,
@@ -181,34 +142,42 @@ class ShipmentViewSet(
                 ],
                 payment_status=Order.PaymentStatusChoices.PAID,
             )
-            .annotate(
-                has_active_shipment=Exists(active_shipments),
-            )
-            .filter(has_active_shipment=False)
             .order_by("-paid_at", "-created_at")
         )
 
-        serializer = self.get_serializer(
-            orders,
-            many=True,
+        # Keep legacy (item-less) orders available until they have a shipment;
+        # orders with items are available while any seller can still ship.
+        eligible = []
+        excluded_statuses = [
+            Shipment.StatusChoices.CANCELLED,
+            Shipment.StatusChoices.RETURNED,
+        ]
+        seller_serializer = EligibleShipmentOrderSerializer(
+            context={"request": request}
         )
+        for order in orders:
+            if order.items.exists():
+                if seller_serializer.get_eligible_sellers(order):
+                    eligible.append(order)
+                continue
 
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
+            has_active_shipment = (
+                Shipment.objects.filter(order=order)
+                .exclude(status__in=excluded_statuses)
+                .exists()
+            )
+            if not has_active_shipment:
+                eligible.append(order)
+
+        serializer = self.get_serializer(eligible, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
-        """
-        Create shipment from a paid order.
+        """Create one shipment for the selected seller's part of a paid order.
 
-        Example input:
-        {
-            "order": 1,
-            "carrier": "dhl"
-        }
+        For a multi-seller order, supply `seller` with the seller's user ID.
+        For a single-seller order the seller is inferred by the serializer.
         """
-
         if not self._is_staff_user(request.user):
             return self._staff_required_response()
 
@@ -217,200 +186,121 @@ class ShipmentViewSet(
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-
+        # ShipmentCreateSerializer delegates to the model's atomic helper and
+        # converts its validation errors into DRF validation errors.
         shipment = serializer.save()
-
-        create_shipment_notification(
-            shipment=shipment,
-            template_key="shipment_created",
-            order_id=shipment.order.order_number,
+        self._notify(shipment, "shipment_created")
+        return Response(
+            ShipmentDetailSerializer(shipment).data,
+            status=status.HTTP_201_CREATED,
         )
-
-        response_serializer = ShipmentDetailSerializer(shipment)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-ready")
     def mark_ready(self, request, pk=None):
-        """
-        Mark shipment as ready to ship.
-
-        Example input:
-        {
-            "note": "Package prepared"
-        }
-        """
-
         if not self._is_staff_user(request.user):
             return self._staff_required_response()
 
         shipment = self.get_object()
-
         serializer = ShipmentMarkReadySerializer(
             data=request.data,
             context={"shipment": shipment},
         )
         serializer.is_valid(raise_exception=True)
-
         note = serializer.validated_data.get("note", "")
 
         try:
-            shipment.mark_ready(
-                user=request.user,
-                note=note,
-            )
-            shipment.refresh_from_db()
+            # The model updates this shipment, its seller fulfillment and the
+            # aggregate order status in one transaction.
+            shipment.mark_ready(user=request.user, note=note)
         except DjangoValidationError as exc:
-            return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return self._validation_error_response(exc)
 
-        create_shipment_notification(
-            shipment=shipment,
-            template_key="shipment_ready",
-            order_id=shipment.order.order_number,
+        shipment.refresh_from_db()
+        self._notify(shipment, "shipment_ready")
+        return Response(
+            ShipmentDetailSerializer(shipment).data,
+            status=status.HTTP_200_OK,
         )
-
-        response_serializer = ShipmentDetailSerializer(shipment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="mark-shipped")
     def mark_shipped(self, request, pk=None):
-        """
-        Mark shipment as shipped.
-
-        Example input:
-        {
-            "tracking_number": "DHL123456",
-            "tracking_url": "https://tracking.example.com/DHL123456",
-            "note": "Package handed to carrier"
-        }
-        """
-
         if not self._is_staff_user(request.user):
             return self._staff_required_response()
 
         shipment = self.get_object()
-
         serializer = ShipmentMarkShippedSerializer(
             data=request.data,
             context={"shipment": shipment},
         )
         serializer.is_valid(raise_exception=True)
 
-        tracking_number = serializer.validated_data.get("tracking_number", "")
-        tracking_url = serializer.validated_data.get("tracking_url", "")
-        note = serializer.validated_data.get("note", "")
-
         try:
             shipment.mark_shipped(
-                tracking_number=tracking_number,
-                tracking_url=tracking_url,
+                tracking_number=serializer.validated_data.get("tracking_number", ""),
+                tracking_url=serializer.validated_data.get("tracking_url", ""),
                 user=request.user,
-                note=note,
-            )
-            shipment.refresh_from_db()
-
-            create_shipment_notification(
-                shipment=shipment,
-                template_key="shipment_shipped",
-                order_id=shipment.order.order_number,
+                note=serializer.validated_data.get("note", ""),
             )
         except DjangoValidationError as exc:
-            return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return self._validation_error_response(exc)
 
-        response_serializer = ShipmentDetailSerializer(shipment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        shipment.refresh_from_db()
+        self._notify(shipment, "shipment_shipped")
+        return Response(
+            ShipmentDetailSerializer(shipment).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")
     def mark_delivered(self, request, pk=None):
-        """
-        Mark shipment as delivered.
-
-        Example input:
-        {
-            "note": "Delivered to customer"
-        }
-        """
-
         if not self._is_staff_user(request.user):
             return self._staff_required_response()
 
         shipment = self.get_object()
-
         serializer = ShipmentMarkDeliveredSerializer(
             data=request.data,
             context={"shipment": shipment},
         )
         serializer.is_valid(raise_exception=True)
 
-        note = serializer.validated_data.get("note", "")
-
         try:
             shipment.mark_delivered(
                 user=request.user,
-                note=note,
-            )
-            shipment.refresh_from_db()
-
-            create_shipment_notification(
-                shipment=shipment,
-                template_key="shipment_delivered",
-                order_id=shipment.order.order_number,
+                note=serializer.validated_data.get("note", ""),
             )
         except DjangoValidationError as exc:
-            return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return self._validation_error_response(exc)
 
-        response_serializer = ShipmentDetailSerializer(shipment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        shipment.refresh_from_db()
+        self._notify(shipment, "shipment_delivered")
+        return Response(
+            ShipmentDetailSerializer(shipment).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
-        """
-        Cancel shipment.
-
-        Example input:
-        {
-            "note": "Shipment cancelled by admin"
-        }
-        """
-
         if not self._is_staff_user(request.user):
             return self._staff_required_response()
 
         shipment = self.get_object()
-
         serializer = ShipmentCancelSerializer(
             data=request.data,
             context={"shipment": shipment},
         )
         serializer.is_valid(raise_exception=True)
 
-        note = serializer.validated_data.get("note", "")
-
         try:
             shipment.cancel(
                 user=request.user,
-                note=note,
-            )
-            shipment.refresh_from_db()
-
-            create_shipment_notification(
-                shipment=shipment,
-                template_key="shipment_cancelled",
-                order_id=shipment.order.order_number,
+                note=serializer.validated_data.get("note", ""),
             )
         except DjangoValidationError as exc:
-            return Response(
-                {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return self._validation_error_response(exc)
 
-        response_serializer = ShipmentDetailSerializer(shipment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        shipment.refresh_from_db()
+        self._notify(shipment, "shipment_cancelled")
+        return Response(
+            ShipmentDetailSerializer(shipment).data,
+            status=status.HTTP_200_OK,
+        )
