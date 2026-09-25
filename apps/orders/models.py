@@ -463,6 +463,89 @@ class OrderItem(models.Model):
         super().save(*args, **kwargs)
 
 
+class SellerOrderFulfillment(models.Model):
+    """
+    Fulfillment state for one seller inside an order.
+
+    A multi-seller order has one fulfillment record per seller.
+    Seller actions must update this model instead of the global Order.status.
+    """
+
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="seller_fulfillments",
+    )
+
+    seller = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="order_fulfillments",
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Order.StatusChoices.choices,
+        default=Order.StatusChoices.PENDING_PAYMENT,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["order", "seller"],
+                name="unique_order_seller_fulfillment",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["order", "seller"]),
+            models.Index(fields=["seller", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.order.order_number} - " f"{self.seller_id} - {self.status}"
+
+
+class SellerOrderFulfillmentHistory(models.Model):
+    fulfillment = models.ForeignKey(
+        SellerOrderFulfillment,
+        on_delete=models.CASCADE,
+        related_name="history",
+    )
+
+    old_status = models.CharField(
+        max_length=30,
+        blank=True,
+    )
+
+    new_status = models.CharField(
+        max_length=30,
+    )
+
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="seller_fulfillment_changes",
+    )
+
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"{self.fulfillment.order.order_number}: "
+            f"{self.old_status} -> {self.new_status}"
+        )
+
+
 class OrderStatusHistory(models.Model):
     """
     History of order status changes.

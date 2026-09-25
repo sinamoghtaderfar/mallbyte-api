@@ -3,14 +3,20 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.orders.models import Cart, CartItem, Order, OrderStatusHistory
+from apps.orders.models import (
+    Cart,
+    CartItem,
+    Order,
+    OrderStatusHistory,
+    SellerOrderFulfillment,
+    SellerOrderFulfillmentHistory,
+)
 from apps.orders.serializers import (
     AddToCartSerializer,
     CartSerializer,
@@ -354,61 +360,68 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], url_path="seller-status")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="seller-status",
+    )
     def seller_status(self, request, pk=None):
-        """
-        Update fulfillment status for seller-visible orders.
+        """Update only the authenticated seller's fulfillment state."""
+        visible_order = self._get_seller_order_or_404(request.user, pk)
 
-        Endpoint:
-        POST /api/orders/orders/{id}/seller-status/
-        """
-        order = self._get_seller_order_or_404(request.user, pk)
+        # Keep validation, state changes, and history in the same transaction.
+        # Payment completion locks the order before changing fulfillment.
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=visible_order.pk)
 
-        serializer = SellerOrderStatusUpdateSerializer(
-            data=request.data,
-            context={"order": order},
-        )
-        serializer.is_valid(raise_exception=True)
+            (
+                fulfillment,
+                _created,
+            ) = SellerOrderFulfillment.objects.select_for_update().get_or_create(
+                order=order,
+                seller=request.user,
+                defaults={
+                    "status": (
+                        order.status
+                        if order.payment_status == Order.PaymentStatusChoices.PAID
+                        else Order.StatusChoices.PENDING_PAYMENT
+                    ),
+                },
+            )
 
-        old_status = order.status
-        new_status = serializer.validated_data["status"]
-        note = serializer.validated_data.get("note", "")
+            serializer = SellerOrderStatusUpdateSerializer(
+                data=request.data,
+                context={
+                    "order": order,
+                    "fulfillment": fulfillment,
+                },
+            )
+            serializer.is_valid(raise_exception=True)
 
-        order.status = new_status
+            old_status = fulfillment.status
+            new_status = serializer.validated_data["status"]
+            note = serializer.validated_data.get("note", "")
 
-        update_fields = ["status", "total_amount", "updated_at"]
+            fulfillment.status = new_status
+            fulfillment.save(update_fields=["status", "updated_at"])
 
-        if new_status == Order.StatusChoices.DELIVERED:
-            order.delivered_at = timezone.now()
-            update_fields.append("delivered_at")
+            SellerOrderFulfillmentHistory.objects.create(
+                fulfillment=fulfillment,
+                old_status=old_status,
+                new_status=new_status,
+                changed_by=request.user,
+                note=note,
+            )
 
-        order.save(update_fields=update_fields)
-
-        OrderStatusHistory.objects.create(
-            order=order,
-            old_status=old_status,
-            new_status=new_status,
-            changed_by=request.user,
-            note=note,
-        )
-
-        create_order_notification(
-            order=order,
-            template_key="order_status_updated",
-            order_id=order.order_number,
-            status_display=order.get_status_display(),
-            metadata={
-                "status": order.status,
-            },
-        )
-
-        order.refresh_from_db()
-
+        # Never modify the marketplace-wide Order.status here.
         response_serializer = SellerOrderDetailSerializer(
             order,
             context={"request": request},
         )
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(
         detail=True,
@@ -417,54 +430,43 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         permission_classes=[IsAuthenticated, IsProductAdmin],
     )
     def update_status(self, request, pk=None):
-        """
-        Admins may move a paid order to processing.
-
-        All other status changes belong to their
-        dedicated business workflows.
-        """
+        """Move an already-paid order to processing as an administrator."""
         visible_order = self.get_object()
 
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=visible_order.pk)
 
-        serializer = OrderStatusUpdateSerializer(
-            data=request.data,
-            context={"order": order},
-        )
-        serializer.is_valid(raise_exception=True)
+            # Validate after acquiring the lock; don't trust stale status.
+            serializer = OrderStatusUpdateSerializer(
+                data=request.data,
+                context={"order": order},
+            )
+            serializer.is_valid(raise_exception=True)
 
-        old_status = order.status
-        new_status = serializer.validated_data["status"]
-        note = serializer.validated_data.get("note", "")
+            old_status = order.status
+            new_status = serializer.validated_data["status"]
+            note = serializer.validated_data.get("note", "")
 
-        order.status = new_status
-        order.save(
-            update_fields=[
-                "status",
-                "total_amount",
-                "updated_at",
-            ]
-        )
+            order.status = new_status
+            order.save(update_fields=["status", "total_amount", "updated_at"])
 
-        OrderStatusHistory.objects.create(
-            order=order,
-            old_status=old_status,
-            new_status=new_status,
-            changed_by=request.user,
-            note=note or "Order preparation started.",
-        )
+            OrderStatusHistory.objects.create(
+                order=order,
+                old_status=old_status,
+                new_status=new_status,
+                changed_by=request.user,
+                note=note or "Order preparation started.",
+            )
 
-        create_order_notification(
-            order=order,
-            template_key="order_status_updated",
-            order_id=order.order_number,
-            status_display=order.get_status_display(),
-            metadata={"status": order.status},
-        )
+            create_order_notification(
+                order=order,
+                template_key="order_status_updated",
+                order_id=order.order_number,
+                status_display=order.get_status_display(),
+                metadata={"status": order.status},
+            )
 
         response_serializer = OrderDetailSerializer(order)
-
         return Response(
             response_serializer.data,
             status=status.HTTP_200_OK,

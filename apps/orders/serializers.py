@@ -6,7 +6,14 @@ from rest_framework import serializers
 
 from apps.discounts.services import apply_discount_to_order, validate_discount_for_cart
 from apps.inventory.models import Stock
-from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatusHistory
+from apps.orders.models import (
+    Cart,
+    CartItem,
+    Order,
+    OrderItem,
+    OrderStatusHistory,
+    SellerOrderFulfillment,
+)
 from apps.orders.services import create_order_notification
 from apps.products.models import Product
 
@@ -354,10 +361,37 @@ class SellerOrderItemSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class SellerOrderListSerializer(serializers.ModelSerializer):
-    """
-    Lightweight order list for sellers.
-    """
+class SellerFulfillmentStatusMixin:
+    """Expose the current seller's fulfillment independently of Order.status."""
+
+    def _seller_fulfillment(self, obj):
+        request = self.context.get("request")
+        if request is None or not request.user.is_authenticated:
+            return None
+
+        return obj.seller_fulfillments.filter(
+            seller_id=request.user.pk,
+        ).first()
+
+    def get_seller_status(self, obj):
+        fulfillment = self._seller_fulfillment(obj)
+        # Orders created before the new fulfillment model may have no record.
+        return fulfillment.status if fulfillment else obj.status
+
+    def get_seller_status_display(self, obj):
+        fulfillment = self._seller_fulfillment(obj)
+        return (
+            fulfillment.get_status_display()
+            if fulfillment
+            else obj.get_status_display()
+        )
+
+
+class SellerOrderListSerializer(
+    SellerFulfillmentStatusMixin,
+    serializers.ModelSerializer,
+):
+    """Order summary with status and totals specific to the current seller."""
 
     status_display = serializers.CharField(
         source="get_status_display",
@@ -369,6 +403,8 @@ class SellerOrderListSerializer(serializers.ModelSerializer):
     )
     seller_items_count = serializers.SerializerMethodField()
     seller_total_amount = serializers.SerializerMethodField()
+    seller_status = serializers.SerializerMethodField()
+    seller_status_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -381,6 +417,8 @@ class SellerOrderListSerializer(serializers.ModelSerializer):
             "payment_status_display",
             "seller_items_count",
             "seller_total_amount",
+            "seller_status",
+            "seller_status_display",
             "created_at",
             "paid_at",
             "delivered_at",
@@ -389,13 +427,13 @@ class SellerOrderListSerializer(serializers.ModelSerializer):
 
     def _seller_items(self, obj):
         request = self.context.get("request")
-        if not request:
+        if request is None or not request.user.is_authenticated:
             return []
 
         return [
             item
             for item in obj.items.all()
-            if item.product.seller_id == request.user.id
+            if item.product.seller_id == request.user.pk
         ]
 
     def get_seller_items_count(self, obj):
@@ -408,13 +446,11 @@ class SellerOrderListSerializer(serializers.ModelSerializer):
         )
 
 
-class SellerOrderDetailSerializer(serializers.ModelSerializer):
-    """
-    Detailed order view for sellers.
-
-    It includes shipping/customer snapshot fields because sellers need them
-    for fulfillment, but only includes the seller's own order items.
-    """
+class SellerOrderDetailSerializer(
+    SellerFulfillmentStatusMixin,
+    serializers.ModelSerializer,
+):
+    """Order details, exposing only the current seller's order items."""
 
     items = serializers.SerializerMethodField()
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
@@ -429,6 +465,8 @@ class SellerOrderDetailSerializer(serializers.ModelSerializer):
     )
     seller_items_count = serializers.SerializerMethodField()
     seller_total_amount = serializers.SerializerMethodField()
+    seller_status = serializers.SerializerMethodField()
+    seller_status_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -441,6 +479,8 @@ class SellerOrderDetailSerializer(serializers.ModelSerializer):
             "payment_status_display",
             "seller_items_count",
             "seller_total_amount",
+            "seller_status",
+            "seller_status_display",
             "receiver_name",
             "receiver_phone",
             "province",
@@ -460,7 +500,7 @@ class SellerOrderDetailSerializer(serializers.ModelSerializer):
 
     def _seller_items_queryset(self, obj):
         request = self.context.get("request")
-        if not request:
+        if request is None or not request.user.is_authenticated:
             return obj.items.none()
 
         return obj.items.select_related("product").filter(
@@ -485,18 +525,22 @@ class SellerOrderDetailSerializer(serializers.ModelSerializer):
 
 
 class SellerOrderStatusUpdateSerializer(serializers.Serializer):
-    """
-    Seller serializer for fulfillment status changes.
-
-    Sellers can only move paid orders through the fulfillment flow:
-    paid -> processing -> shipped -> delivered
-    """
+    """Validate a transition of the seller's own fulfillment, not the order."""
 
     status = serializers.ChoiceField(
         choices=[
-            (Order.StatusChoices.PROCESSING, Order.StatusChoices.PROCESSING.label),
-            (Order.StatusChoices.SHIPPED, Order.StatusChoices.SHIPPED.label),
-            (Order.StatusChoices.DELIVERED, Order.StatusChoices.DELIVERED.label),
+            (
+                Order.StatusChoices.PROCESSING,
+                Order.StatusChoices.PROCESSING.label,
+            ),
+            (
+                Order.StatusChoices.SHIPPED,
+                Order.StatusChoices.SHIPPED.label,
+            ),
+            (
+                Order.StatusChoices.DELIVERED,
+                Order.StatusChoices.DELIVERED.label,
+            ),
         ],
     )
     note = serializers.CharField(required=False, allow_blank=True)
@@ -509,9 +553,15 @@ class SellerOrderStatusUpdateSerializer(serializers.Serializer):
 
     def validate_status(self, new_status):
         order = self.context.get("order")
+        fulfillment = self.context.get("fulfillment")
 
-        if not order:
-            return new_status
+        if order is None or fulfillment is None:
+            raise serializers.ValidationError("Seller fulfillment is required.")
+
+        if fulfillment.order_id != order.pk:
+            raise serializers.ValidationError(
+                "Fulfillment does not belong to this order."
+            )
 
         if order.payment_status != Order.PaymentStatusChoices.PAID:
             raise serializers.ValidationError(
@@ -521,16 +571,16 @@ class SellerOrderStatusUpdateSerializer(serializers.Serializer):
         if order.status in {
             Order.StatusChoices.CANCELLED,
             Order.StatusChoices.REFUNDED,
-            Order.StatusChoices.DELIVERED,
         }:
             raise serializers.ValidationError(
                 "This order cannot be changed by the seller."
             )
 
-        allowed_next_statuses = self.allowed_transitions.get(order.status, set())
-
-        if new_status not in allowed_next_statuses:
-            raise serializers.ValidationError("Invalid seller order status transition.")
+        allowed = self.allowed_transitions.get(fulfillment.status, set())
+        if new_status not in allowed:
+            raise serializers.ValidationError(
+                "Invalid seller fulfillment status transition."
+            )
 
         return new_status
 
@@ -681,7 +731,13 @@ class CheckoutSerializer(serializers.Serializer):
                     unit_price=cart_item.unit_price,
                     total_price=cart_item.total_price,
                 )
-
+                SellerOrderFulfillment.objects.get_or_create(
+                    order=order,
+                    seller=cart_item.product.seller,
+                    defaults={
+                        "status": Order.StatusChoices.PENDING_PAYMENT,
+                    },
+                )
             if discount is not None:
                 apply_discount_to_order(
                     discount=discount,

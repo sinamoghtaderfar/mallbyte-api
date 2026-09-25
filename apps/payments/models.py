@@ -7,7 +7,12 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.inventory.models import Stock, StockMovement
-from apps.orders.models import Order, OrderStatusHistory
+from apps.orders.models import (
+    Order,
+    OrderStatusHistory,
+    SellerOrderFulfillment,
+    SellerOrderFulfillmentHistory,
+)
 
 
 class Payment(models.Model):
@@ -229,6 +234,36 @@ class Payment(models.Model):
             )
 
             order.mark_paid()
+
+            # Record independent fulfillment for each seller in this order.
+            seller_ids = order.items.values_list(
+                "product__seller_id", flat=True
+            ).distinct()
+
+            for seller_id in seller_ids:
+                (
+                    fulfillment,
+                    _created,
+                ) = SellerOrderFulfillment.objects.select_for_update().get_or_create(
+                    order=order,
+                    seller_id=seller_id,
+                    defaults={
+                        "status": Order.StatusChoices.PENDING_PAYMENT,
+                    },
+                )
+
+                if fulfillment.status == Order.StatusChoices.PENDING_PAYMENT:
+                    old_status = fulfillment.status
+                    fulfillment.status = Order.StatusChoices.PAID
+                    fulfillment.save(update_fields=["status", "updated_at"])
+
+                    SellerOrderFulfillmentHistory.objects.create(
+                        fulfillment=fulfillment,
+                        old_status=old_status,
+                        new_status=fulfillment.status,
+                        changed_by=payment.user,
+                        note=f"Payment completed: {payment.payment_number}",
+                    )
 
             OrderStatusHistory.objects.create(
                 order=order,

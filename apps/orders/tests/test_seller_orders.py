@@ -1,11 +1,14 @@
-
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.orders.models import Order, OrderItem
+from apps.orders.models import (
+    Order,
+    OrderItem,
+    SellerOrderFulfillment,
+)
 from apps.products.models import Brand, Category, Product
 
 User = get_user_model()
@@ -62,7 +65,11 @@ class SellerOrderAPITests(APITestCase):
             is_active=True,
         )
 
-    def create_order(self, status_value=Order.StatusChoices.PAID, payment_status=Order.PaymentStatusChoices.PAID):
+    def create_order(
+        self,
+        status_value=Order.StatusChoices.PAID,
+        payment_status=Order.PaymentStatusChoices.PAID,
+    ):
         order = Order.objects.create(
             user=self.customer,
             status=status_value,
@@ -134,7 +141,9 @@ class SellerOrderAPITests(APITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["id"], order.id)
         self.assertEqual(response.data[0]["seller_items_count"], 1)
-        self.assertEqual(Decimal(str(response.data[0]["seller_total_amount"])), Decimal("1000"))
+        self.assertEqual(
+            Decimal(str(response.data[0]["seller_total_amount"])), Decimal("1000")
+        )
 
     def test_seller_detail_only_returns_own_items(self):
         order = self.create_order()
@@ -156,8 +165,20 @@ class SellerOrderAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_seller_can_move_paid_order_to_processing(self):
+    def test_seller_can_move_own_fulfillment_to_processing(self):
         order = self.create_order()
+
+        seller_fulfillment = SellerOrderFulfillment.objects.create(
+            order=order,
+            seller=self.seller,
+            status=Order.StatusChoices.PAID,
+        )
+
+        other_fulfillment = SellerOrderFulfillment.objects.create(
+            order=order,
+            seller=self.other_seller,
+            status=Order.StatusChoices.PAID,
+        )
 
         self.client.force_authenticate(user=self.seller)
 
@@ -165,16 +186,41 @@ class SellerOrderAPITests(APITestCase):
             f"/api/orders/orders/{order.id}/seller-status/",
             {
                 "status": Order.StatusChoices.PROCESSING,
-                "note": "Seller started preparing the order.",
+                "note": "Seller started preparing their items.",
             },
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+            response.data,
+        )
 
+        seller_fulfillment.refresh_from_db()
+        other_fulfillment.refresh_from_db()
         order.refresh_from_db()
-        self.assertEqual(order.status, Order.StatusChoices.PROCESSING)
-        self.assertEqual(order.status_history.last().new_status, Order.StatusChoices.PROCESSING)
+
+        self.assertEqual(
+            seller_fulfillment.status,
+            Order.StatusChoices.PROCESSING,
+        )
+
+        self.assertEqual(
+            other_fulfillment.status,
+            Order.StatusChoices.PAID,
+        )
+
+        # Seller action must not modify the whole marketplace order.
+        self.assertEqual(
+            order.status,
+            Order.StatusChoices.PAID,
+        )
+
+        self.assertEqual(
+            response.data["seller_status"],
+            Order.StatusChoices.PROCESSING,
+        )
 
     def test_seller_cannot_skip_fulfillment_status(self):
         order = self.create_order()
@@ -223,3 +269,47 @@ class SellerOrderAPITests(APITestCase):
         response = self.client.get(f"/api/orders/orders/{order.id}/seller-detail/")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_one_seller_cannot_change_other_seller_fulfillment(self):
+        order = self.create_order()
+
+        seller_fulfillment = SellerOrderFulfillment.objects.create(
+            order=order,
+            seller=self.seller,
+            status=Order.StatusChoices.PAID,
+        )
+
+        other_fulfillment = SellerOrderFulfillment.objects.create(
+            order=order,
+            seller=self.other_seller,
+            status=Order.StatusChoices.PAID,
+        )
+
+        self.client.force_authenticate(user=self.seller)
+
+        response = self.client.post(
+            f"/api/orders/orders/{order.id}/seller-status/",
+            {
+                "status": Order.StatusChoices.PROCESSING,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+            response.data,
+        )
+
+        seller_fulfillment.refresh_from_db()
+        other_fulfillment.refresh_from_db()
+
+        self.assertEqual(
+            seller_fulfillment.status,
+            Order.StatusChoices.PROCESSING,
+        )
+
+        self.assertEqual(
+            other_fulfillment.status,
+            Order.StatusChoices.PAID,
+        )
