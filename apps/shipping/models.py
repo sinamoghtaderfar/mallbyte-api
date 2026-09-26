@@ -242,8 +242,16 @@ class Shipment(models.Model):
         seller_statuses = list(
             order.seller_fulfillments.values_list("status", flat=True)
         )
-        if not seller_statuses:
-            # Preserve the former behavior for orders with no seller items.
+        # Legacy unassigned parcels represent the whole order, not one seller.
+        legacy_active = Shipment.objects.filter(
+            order=order, seller_fulfillment__isnull=True,
+        ).exclude(
+            status__in=[
+                Shipment.StatusChoices.CANCELLED,
+                Shipment.StatusChoices.RETURNED,
+            ]
+        ).exists()
+        if legacy_active or not seller_statuses:
             new_status = fallback_status
         elif all(s == Order.StatusChoices.DELIVERED for s in seller_statuses):
             new_status = Order.StatusChoices.DELIVERED

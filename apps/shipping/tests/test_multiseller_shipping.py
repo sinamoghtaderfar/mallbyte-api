@@ -308,6 +308,32 @@ class MultiSellerShippingTests(APITestCase):
         replacement = self.create_shipment(self.first_seller)
         self.assertNotEqual(first.pk, replacement.pk)
 
+    def test_legacy_unassigned_shipment_still_updates_whole_order(self):
+        legacy = Shipment.objects.create(
+            order=self.order,
+            user=self.customer,
+            carrier=Shipment.CarrierChoices.DHL,
+            receiver_name=self.order.receiver_name,
+            receiver_phone=self.order.receiver_phone,
+            province=self.order.province,
+            city=self.order.city,
+            address=self.order.address,
+            postal_code=self.order.postal_code,
+            created_by=self.admin,
+        )
+        legacy.mark_shipped(tracking_number="LEGACY-1", user=self.admin)
+        self.order.refresh_from_db()
+        self.first_fulfillment.refresh_from_db()
+        self.second_fulfillment.refresh_from_db()
+        self.assertEqual(self.order.status, Order.StatusChoices.SHIPPED)
+        self.assertEqual(self.first_fulfillment.status, Order.StatusChoices.PAID)
+        self.assertEqual(self.second_fulfillment.status, Order.StatusChoices.PAID)
+
+        legacy.mark_delivered(user=self.admin)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.StatusChoices.DELIVERED)
+        self.assertIsNotNone(self.order.delivered_at)
+
     def test_shipment_details_expose_the_correct_seller(self):
         first = self.create_shipment(self.first_seller)
         response = self.client.get(reverse("shipment-detail", args=[first.pk]))

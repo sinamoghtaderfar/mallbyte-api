@@ -7,6 +7,7 @@ from rest_framework.test import APITestCase
 from apps.orders.models import (
     Order,
     OrderItem,
+    OrderStatusHistory,
     SellerOrderFulfillment,
 )
 from apps.products.models import Brand, Category, Product
@@ -211,15 +212,67 @@ class SellerOrderAPITests(APITestCase):
             Order.StatusChoices.PAID,
         )
 
-        # Seller action must not modify the whole marketplace order.
+        self.assertEqual(order.status, Order.StatusChoices.PROCESSING)
         self.assertEqual(
-            order.status,
-            Order.StatusChoices.PAID,
+            OrderStatusHistory.objects.filter(
+                order=order,
+                old_status=Order.StatusChoices.PAID,
+                new_status=Order.StatusChoices.PROCESSING,
+            ).count(),
+            1,
         )
-
         self.assertEqual(
             response.data["seller_status"],
             Order.StatusChoices.PROCESSING,
+        )
+        self.assertEqual(response.data["status"], Order.StatusChoices.PROCESSING)
+
+    def test_second_seller_preparation_does_not_duplicate_history(self):
+        order = self.create_order()
+        for seller in (self.seller, self.other_seller):
+            SellerOrderFulfillment.objects.create(
+                order=order, seller=seller, status=Order.StatusChoices.PAID,
+            )
+            self.client.force_authenticate(user=seller)
+            response = self.client.post(
+                f"/api/orders/orders/{order.id}/seller-status/",
+                {"status": Order.StatusChoices.PROCESSING},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.StatusChoices.PROCESSING)
+        self.assertEqual(
+            OrderStatusHistory.objects.filter(
+                order=order,
+                old_status=Order.StatusChoices.PAID,
+                new_status=Order.StatusChoices.PROCESSING,
+            ).count(),
+            1,
+        )
+
+    def test_historical_paid_orders_backfill_missing_seller_rows(self):
+        from importlib import import_module
+        from django.apps import apps as django_apps
+
+        order = self.create_order()
+        self.assertFalse(SellerOrderFulfillment.objects.filter(order=order).exists())
+        migration = import_module(
+            "apps.orders.migrations.0003_backfill_seller_fulfillments"
+        )
+        migration.backfill_missing_seller_fulfillments(django_apps, None)
+        expected = {
+            (self.seller.pk, Order.StatusChoices.PAID),
+            (self.other_seller.pk, Order.StatusChoices.PAID),
+        }
+        self.assertEqual(
+            set(SellerOrderFulfillment.objects.filter(order=order)
+                .values_list("seller_id", "status")),
+            expected,
+        )
+        migration.backfill_missing_seller_fulfillments(django_apps, None)
+        self.assertEqual(
+            SellerOrderFulfillment.objects.filter(order=order).count(), 2
         )
 
     def test_seller_cannot_skip_fulfillment_status(self):

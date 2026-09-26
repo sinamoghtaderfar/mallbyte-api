@@ -300,93 +300,93 @@ class Order(models.Model):
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=self.pk)
 
-        if order.status == self.StatusChoices.CANCELLED:
-            raise ValidationError("Order is already cancelled.")
+            if order.status == self.StatusChoices.CANCELLED:
+                raise ValidationError("Order is already cancelled.")
 
-        if (
-            order.status != self.StatusChoices.PENDING_PAYMENT
-            or order.payment_status
-            not in {
-                self.PaymentStatusChoices.UNPAID,
-                self.PaymentStatusChoices.FAILED,
-            }
-        ):
-            raise ValidationError("Only unpaid pending orders can be cancelled.")
+            if (
+                order.status != self.StatusChoices.PENDING_PAYMENT
+                or order.payment_status
+                not in {
+                    self.PaymentStatusChoices.UNPAID,
+                    self.PaymentStatusChoices.FAILED,
+                }
+            ):
+                raise ValidationError("Only unpaid pending orders can be cancelled.")
 
-        for item in order.items.select_related("product", "warehouse"):
-            if not item.warehouse_id:
+            for item in order.items.select_related("product", "warehouse"):
+                if not item.warehouse_id:
 
-                continue
+                    continue
 
-            stock = Stock.objects.select_for_update().get(
-                product=item.product,
-                warehouse=item.warehouse,
+                stock = Stock.objects.select_for_update().get(
+                    product=item.product,
+                    warehouse=item.warehouse,
+                )
+
+                stock.release_reservation(
+                    quantity=item.quantity,
+                    user=user,
+                )
+
+            from apps.discounts.models import Discount, DiscountUsage
+            from apps.payments.models import Payment, PaymentEvent
+
+            usage = DiscountUsage.objects.select_for_update().filter(order=order).first()
+
+            if usage:
+                discount_id = usage.discount_id
+                usage.delete()
+
+                Discount.objects.filter(
+                    pk=discount_id,
+                    used_count__gt=0,
+                ).update(used_count=F("used_count") - 1)
+
+            now = timezone.now()
+
+            pending_payments = Payment.objects.select_for_update().filter(
+                order=order,
+                status=Payment.StatusChoices.PENDING,
             )
 
-            stock.release_reservation(
-                quantity=item.quantity,
-                user=user,
-            )
+            for payment in pending_payments:
+                payment.status = Payment.StatusChoices.CANCELLED
+                payment.cancelled_at = now
+                payment.failure_reason = "Order cancelled."
+                payment.save(
+                    update_fields=[
+                        "status",
+                        "cancelled_at",
+                        "failure_reason",
+                        "updated_at",
+                    ]
+                )
 
-        from apps.discounts.models import Discount, DiscountUsage
-        from apps.payments.models import Payment, PaymentEvent
+                PaymentEvent.objects.create(
+                    payment=payment,
+                    event_type="payment_cancelled",
+                    old_status=Payment.StatusChoices.PENDING,
+                    new_status=Payment.StatusChoices.CANCELLED,
+                    message="Order cancelled.",
+                    created_by=user,
+                )
 
-        usage = DiscountUsage.objects.select_for_update().filter(order=order).first()
-
-        if usage:
-            discount_id = usage.discount_id
-            usage.delete()
-
-            Discount.objects.filter(
-                pk=discount_id,
-                used_count__gt=0,
-            ).update(used_count=F("used_count") - 1)
-
-        now = timezone.now()
-
-        pending_payments = Payment.objects.select_for_update().filter(
-            order=order,
-            status=Payment.StatusChoices.PENDING,
-        )
-
-        for payment in pending_payments:
-            payment.status = Payment.StatusChoices.CANCELLED
-            payment.cancelled_at = now
-            payment.failure_reason = "Order cancelled."
-            payment.save(
+            order.status = self.StatusChoices.CANCELLED
+            order.cancelled_at = now
+            order.save(
                 update_fields=[
                     "status",
                     "cancelled_at",
-                    "failure_reason",
+                    "total_amount",
                     "updated_at",
                 ]
             )
 
-            PaymentEvent.objects.create(
-                payment=payment,
-                event_type="payment_cancelled",
-                old_status=Payment.StatusChoices.PENDING,
-                new_status=Payment.StatusChoices.CANCELLED,
-                message="Order cancelled.",
-                created_by=user,
-            )
+            self.status = order.status
+            self.cancelled_at = order.cancelled_at
+            self.updated_at = order.updated_at
 
-        order.status = self.StatusChoices.CANCELLED
-        order.cancelled_at = now
-        order.save(
-            update_fields=[
-                "status",
-                "cancelled_at",
-                "total_amount",
-                "updated_at",
-            ]
-        )
-
-        self.status = order.status
-        self.cancelled_at = order.cancelled_at
-        self.updated_at = order.updated_at
-
-        return self
+            return self
 
 
 class OrderItem(models.Model):

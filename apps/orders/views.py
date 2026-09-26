@@ -413,7 +413,20 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
                 note=note,
             )
 
-        # Never modify the marketplace-wide Order.status here.
+            # The first seller preparing their items puts the whole order in
+            # processing; shipping remains responsible for shipped/delivered.
+            if order.status == Order.StatusChoices.PAID:
+                order.status = Order.StatusChoices.PROCESSING
+                order.save(update_fields=["status", "total_amount", "updated_at"])
+                OrderStatusHistory.objects.create(
+                    order=order,
+                    old_status=Order.StatusChoices.PAID,
+                    new_status=Order.StatusChoices.PROCESSING,
+                    changed_by=request.user,
+                    note=note or "Seller started preparing their items.",
+                )
+
+        # Shipping remains responsible for aggregate shipped/delivered states.
         response_serializer = SellerOrderDetailSerializer(
             order,
             context={"request": request},
