@@ -1,14 +1,19 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import F, Prefetch
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from apps.returns.models import ReturnRequest
+from apps.returns.models import ReturnAttachment, ReturnItem, ReturnRequest
 from apps.returns.serializers import (
     ReturnActionSerializer,
     ReturnApproveSerializer,
+    CustomerReturnRequestDetailSerializer,
+    SellerReturnRequestListSerializer,
+    SellerReturnRequestDetailSerializer,
     ReturnRequestCreateSerializer,
     ReturnRequestDetailSerializer,
     ReturnRequestListSerializer,
@@ -47,6 +52,12 @@ class ReturnRequestViewSet(
         return queryset.filter(customer=self.request.user)
 
     def get_serializer_class(self):
+        if self.action == "seller":
+            return SellerReturnRequestListSerializer
+        if self.action == "seller_detail":
+            return SellerReturnRequestDetailSerializer
+        if self.action == "retrieve" and not is_admin_user(self.request.user):
+            return CustomerReturnRequestDetailSerializer
         if self.action == "create":
             return ReturnRequestCreateSerializer
 
@@ -60,6 +71,20 @@ class ReturnRequestViewSet(
             return ReturnActionSerializer
 
         return ReturnRequestDetailSerializer
+
+    def _detail_response(self, obj, *, response_status=status.HTTP_200_OK):
+        serializer_class = (
+            ReturnRequestDetailSerializer
+            if is_admin_user(self.request.user)
+            else CustomerReturnRequestDetailSerializer
+        )
+        serializer = serializer_class(obj, context=self.get_serializer_context())
+        return Response(serializer.data, status=response_status)
+
+    @staticmethod
+    def _require_seller(user):
+        if not getattr(user, "is_seller", False):
+            raise PermissionDenied("Only sellers can access seller returns.")
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(
@@ -76,30 +101,42 @@ class ReturnRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ReturnRequestDetailSerializer(return_request)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return self._detail_response(
+            return_request, response_status=status.HTTP_201_CREATED
+        )
 
 
     def _get_seller_return_queryset(self):
-        return (
-            ReturnRequest.objects.select_related(
-                "customer",
-                "order",
-                "reviewed_by",
+        seller_id = self.request.user.pk
+        own_items = (
+            ReturnItem.objects.filter(order_item__product__seller_id=seller_id)
+            .select_related("order_item")
+            .order_by("pk")
+        )
+        own_attachments = (
+            ReturnAttachment.objects.filter(
+                return_item__order_item__product__seller_id=seller_id,
+                uploaded_by_id=F("return_request__customer_id"),
             )
+            .order_by("-created_at")
+        )
+        return (
+            ReturnRequest.objects.select_related("customer", "order", "reviewed_by")
+            .filter(items__order_item__product__seller_id=seller_id)
+            .distinct()
             .prefetch_related(
-                "items",
-                "items__order_item",
-                "items__order_item__product",
-                "attachments",
+                Prefetch("items", queryset=own_items, to_attr="seller_visible_items"),
+                Prefetch(
+                    "attachments", queryset=own_attachments,
+                    to_attr="seller_visible_attachments",
+                ),
                 "status_history",
             )
-            .filter(items__order_item__product__seller=self.request.user)
-            .distinct()
         )
 
     @action(detail=False, methods=["get"], url_path="seller")
     def seller(self, request):
+        self._require_seller(request.user)
         queryset = self.filter_queryset(
             self._get_seller_return_queryset().order_by("-created_at")
         )
@@ -114,6 +151,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["get"], url_path="seller-detail")
     def seller_detail(self, request, pk=None):
+        self._require_seller(request.user)
         return_request = get_object_or_404(
             self._get_seller_return_queryset(),
             pk=pk,
@@ -141,8 +179,7 @@ class ReturnRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ReturnRequestDetailSerializer(return_request)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(return_request)
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
@@ -170,8 +207,7 @@ class ReturnRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ReturnRequestDetailSerializer(return_request)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(return_request)
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, pk=None):
@@ -198,8 +234,7 @@ class ReturnRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ReturnRequestDetailSerializer(return_request)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(return_request)
 
     @action(detail=True, methods=["post"], url_path="mark-received")
     def mark_received(self, request, pk=None):
@@ -226,8 +261,7 @@ class ReturnRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ReturnRequestDetailSerializer(return_request)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(return_request)
 
     @action(detail=True, methods=["post"], url_path="mark-refunded")
     def mark_refunded(self, request, pk=None):
@@ -254,5 +288,4 @@ class ReturnRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = ReturnRequestDetailSerializer(return_request)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(return_request)

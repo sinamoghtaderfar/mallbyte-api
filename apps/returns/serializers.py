@@ -214,6 +214,154 @@ class ReturnRequestDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+# Seller responses are intentionally allowlisted. Never reuse the admin
+# serializer or load unfiltered return items for the seller endpoints.
+class PublicReturnItemSerializer(ReturnItemSerializer):
+    class Meta(ReturnItemSerializer.Meta):
+        fields = [
+            field for field in ReturnItemSerializer.Meta.fields
+            if field != "inspection_note"
+        ]
+
+
+class PublicReturnHistorySerializer(serializers.ModelSerializer):
+    # Admin notes in status history may include private review information.
+    # Preserve the JSON shape consumed by existing customer/seller components.
+    changed_by = serializers.SerializerMethodField()
+    note = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_changed_by(obj):
+        return None
+
+    @staticmethod
+    def get_note(obj):
+        return ""
+
+    class Meta:
+        model = ReturnStatusHistory
+        fields = [
+            "id", "old_status", "new_status", "changed_by", "note",
+            "created_at", "updated_at",
+        ]
+
+
+class CustomerReturnRequestDetailSerializer(ReturnRequestDetailSerializer):
+    items = PublicReturnItemSerializer(many=True, read_only=True)
+    status_history = PublicReturnHistorySerializer(many=True, read_only=True)
+    attachments = serializers.SerializerMethodField()
+
+    def get_attachments(self, obj):
+        # Admin-only uploads are not automatically visible to the customer.
+        own_uploads = [
+            attachment for attachment in obj.attachments.all()
+            if attachment.uploaded_by_id == obj.customer_id
+        ]
+        return ReturnAttachmentSerializer(
+            own_uploads, many=True, context=self.context
+        ).data
+
+    class Meta(ReturnRequestDetailSerializer.Meta):
+        fields = [
+            field for field in ReturnRequestDetailSerializer.Meta.fields
+            if field != "internal_note"
+        ]
+
+
+class SellerVisibleReturnMixin:
+    """Calculate money exclusively from the items prefetched for this seller."""
+
+    @staticmethod
+    def visible_items(obj):
+        # Fail closed: missing seller-specific prefetch must not load all items.
+        return getattr(obj, "seller_visible_items", ())
+
+    def get_reason(self, obj):
+        items = self.visible_items(obj)
+        return items[0].reason if items else None
+
+    def get_total_requested_amount(self, obj):
+        from decimal import Decimal
+        amount = sum(
+            (item.requested_refund_amount for item in self.visible_items(obj)),
+            Decimal("0.00"),
+        )
+        return f"{amount:.2f}"
+
+    def get_total_approved_amount(self, obj):
+        from decimal import Decimal
+        amount = sum(
+            (item.approved_refund_amount for item in self.visible_items(obj)),
+            Decimal("0.00"),
+        )
+        return f"{amount:.2f}"
+
+
+class SellerReturnRequestListSerializer(
+    SellerVisibleReturnMixin, serializers.ModelSerializer
+):
+    order_number = serializers.CharField(source="order.order_number", read_only=True)
+    customer = serializers.StringRelatedField(read_only=True)
+    reason = serializers.SerializerMethodField()
+    total_requested_amount = serializers.SerializerMethodField()
+    total_approved_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReturnRequest
+        fields = [
+            "id", "request_number", "customer", "order", "order_number",
+            "status", "reason", "requested_resolution", "refund_method",
+            "total_requested_amount", "total_approved_amount",
+            "created_at", "updated_at",
+        ]
+
+
+class SellerReturnItemSerializer(PublicReturnItemSerializer):
+    """Whitelist own-item fields; do not expose internal inspection notes."""
+
+
+class SellerReturnAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReturnAttachment
+        fields = [
+            "id", "return_item", "attachment_type", "file", "caption",
+            "created_at", "updated_at",
+        ]
+
+
+class SellerReturnRequestDetailSerializer(SellerReturnRequestListSerializer):
+    items = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
+    status_history = PublicReturnHistorySerializer(many=True, read_only=True)
+    reviewed_by = serializers.StringRelatedField(read_only=True)
+    customer_note = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_customer_note(obj):
+        # The request-wide note may discuss another seller's products.
+        # Each seller can see the customer_note on their own return items.
+        return ""
+
+    def get_items(self, obj):
+        return SellerReturnItemSerializer(
+            self.visible_items(obj), many=True, context=self.context
+        ).data
+
+    def get_attachments(self, obj):
+        # Unlinked (request-wide) and other-seller attachments are hidden.
+        return SellerReturnAttachmentSerializer(
+            getattr(obj, "seller_visible_attachments", ()),
+            many=True,
+            context=self.context,
+        ).data
+
+    class Meta(SellerReturnRequestListSerializer.Meta):
+        fields = SellerReturnRequestListSerializer.Meta.fields + [
+            "customer_note", "reviewed_by", "reviewed_at", "closed_at",
+            "items", "attachments", "status_history",
+        ]
+
+
 class ReturnActionSerializer(serializers.Serializer):
     note = serializers.CharField(
         required=False,

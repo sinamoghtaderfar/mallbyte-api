@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.notifications.services import create_notification
 from apps.notifications.templates import render_notification_template
-from apps.orders.models import Order, OrderItem
+from apps.orders.models import Order, OrderItem, SellerOrderFulfillment
 from apps.returns.models import (
     ReturnItem,
     ReturnRequest,
@@ -102,8 +102,12 @@ def create_return_request(
     if order.user_id != customer.id:
         raise ValidationError("You can only return your own orders.")
 
-    if order.status != Order.StatusChoices.DELIVERED:
-        raise ValidationError("Only delivered orders can be returned.")
+    if order.payment_status != Order.PaymentStatusChoices.PAID or order.status in {
+        Order.StatusChoices.PENDING_PAYMENT,
+        Order.StatusChoices.CANCELLED,
+        Order.StatusChoices.REFUNDED,
+    }:
+        raise ValidationError("Only paid, active orders with delivered items can be returned.")
 
     if not items:
         raise ValidationError("At least one return item is required.")
@@ -129,6 +133,23 @@ def create_return_request(
 
         if order_item.order_id != order.id:
             raise ValidationError("Return item does not belong to this order.")
+
+        seller_status = (
+            SellerOrderFulfillment.objects.filter(
+                order_id=order.id, seller_id=order_item.product.seller_id
+            )
+            .values_list("status", flat=True)
+            .first()
+        )
+        if seller_status is not None:
+            if seller_status != Order.StatusChoices.DELIVERED:
+                raise ValidationError(
+                    "Only items delivered by their seller can be returned."
+                )
+        elif order.status != Order.StatusChoices.DELIVERED:
+            # Legacy orders without seller fulfillment records retain their
+            # whole-order delivery rule. Never infer delivery from payment.
+            raise ValidationError("Only delivered items can be returned.")
 
         quantity = item_data["quantity"]
 
@@ -230,8 +251,21 @@ def approve_return_request(*, return_request, user, note="", approved_amount=Non
 
     old_status = return_request.status
 
+    return_items = list(return_request.items.select_for_update().order_by("pk"))
+    if not return_items:
+        raise ValidationError("A return request must have at least one item.")
+    requested_total = sum(
+        (item.requested_refund_amount for item in return_items), Decimal("0.00")
+    )
+    if requested_total != return_request.total_requested_amount:
+        raise ValidationError("Return item amounts do not match the request total.")
     if approved_amount is None:
-        approved_amount = return_request.total_requested_amount
+        approved_amount = requested_total
+    else:
+        approved_amount = Decimal(str(approved_amount))
+    if approved_amount < 0 or approved_amount > requested_total:
+        raise ValidationError("Approved amount must be between zero and requested total.")
+    approved_amount = approved_amount.quantize(Decimal("0.01"))
 
     return_request.status = ReturnRequest.Status.APPROVED
     return_request.total_approved_amount = approved_amount
@@ -247,9 +281,23 @@ def approve_return_request(*, return_request, user, note="", approved_amount=Non
         ]
     )
 
-    for item in return_request.items.all():
+    # Allocate a partial approval proportionally to item amounts. Remainder
+    # goes to the last item so seller-level totals equal the global total.
+    allocated = Decimal("0.00")
+    funded = [item.pk for item in return_items if item.requested_refund_amount > 0]
+    last_funded_id = funded[-1] if funded else None
+    for item in return_items:
+        if item.requested_refund_amount == 0 or requested_total == 0:
+            item_amount = Decimal("0.00")
+        elif item.pk == last_funded_id:
+            item_amount = approved_amount - allocated
+        else:
+            item_amount = (
+                approved_amount * item.requested_refund_amount / requested_total
+            ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        allocated += item_amount
         item.status = ReturnItem.ItemStatus.APPROVED
-        item.approved_refund_amount = item.requested_refund_amount
+        item.approved_refund_amount = item_amount
         item.save(update_fields=["status", "approved_refund_amount", "updated_at"])
 
     create_return_status_history(
