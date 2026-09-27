@@ -190,6 +190,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
     """
 
     product_id = serializers.IntegerField(source="product.id", read_only=True)
+    seller_id = serializers.IntegerField(source="product.seller_id", read_only=True)
     warehouse_name = serializers.ReadOnlyField(source="warehouse.name")
 
     class Meta:
@@ -198,6 +199,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_id",
+            "seller_id",
             "warehouse",
             "warehouse_name",
             "product_name",
