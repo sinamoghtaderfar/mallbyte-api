@@ -16,6 +16,7 @@ from apps.support.models import (
     TicketAuditLog,
     TicketMessage,
 )
+from apps.support.tests.helpers import grant_support_agent
 
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
 
@@ -25,7 +26,10 @@ class SupportTicketExtraAPITests(APITestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
-        shutil.rmtree(TEST_MEDIA_ROOT, ignore_errors=True)
+        shutil.rmtree(
+            TEST_MEDIA_ROOT,
+            ignore_errors=True,
+        )
 
     def create_test_user(
         self,
@@ -54,8 +58,8 @@ class SupportTicketExtraAPITests(APITestCase):
             phone="+989970000001",
             email="support_extra_staff@example.com",
             full_name="Support Extra Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.support_staff)
 
         self.customer = self.create_test_user(
             phone="+989970000002",
@@ -98,7 +102,7 @@ class SupportTicketExtraAPITests(APITestCase):
     def authenticate_staff(self):
         self.get_api_client().force_authenticate(user=self.support_staff)
 
-    def test_staff_can_create_support_tag(self):
+    def test_support_agent_can_create_support_tag(self):
         self.authenticate_staff()
 
         url = reverse("support-tag-list")
@@ -113,12 +117,21 @@ class SupportTicketExtraAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         tag = SupportTag.objects.get(name="Delivery Problem")
 
-        self.assertEqual(tag.slug, "delivery-problem")
-        self.assertEqual(tag.color, "#00AAFF")
+        self.assertEqual(
+            tag.slug,
+            "delivery-problem",
+        )
+        self.assertEqual(
+            tag.color,
+            "#00AAFF",
+        )
 
     def test_customer_cannot_create_support_tag(self):
         self.authenticate_customer()
@@ -134,7 +147,11 @@ class SupportTicketExtraAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
         self.assertFalse(SupportTag.objects.filter(name="Customer Tag").exists())
 
     def test_authenticated_user_can_list_support_tags(self):
@@ -144,7 +161,10 @@ class SupportTicketExtraAPITests(APITestCase):
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
 
@@ -153,12 +173,18 @@ class SupportTicketExtraAPITests(APITestCase):
 
         tag_ids = {item["id"] for item in data}
 
-        self.assertIn(self.tag.id, tag_ids)
+        self.assertIn(
+            self.tag.id,
+            tag_ids,
+        )
 
-    def test_staff_can_add_and_remove_tag_from_ticket(self):
+    def test_support_agent_can_add_and_remove_tag_from_ticket(self):
         self.authenticate_staff()
 
-        add_url = reverse("support-ticket-add-tag", args=[self.ticket.pk])
+        add_url = reverse(
+            "support-ticket-add-tag",
+            args=[self.ticket.pk],
+        )
 
         add_response = self.client.post(
             add_url,
@@ -168,7 +194,10 @@ class SupportTicketExtraAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(add_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            add_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         self.ticket.refresh_from_db()
 
@@ -183,7 +212,10 @@ class SupportTicketExtraAPITests(APITestCase):
             ).exists()
         )
 
-        remove_url = reverse("support-ticket-remove-tag", args=[self.ticket.pk])
+        remove_url = reverse(
+            "support-ticket-remove-tag",
+            args=[self.ticket.pk],
+        )
 
         remove_response = self.client.post(
             remove_url,
@@ -193,7 +225,10 @@ class SupportTicketExtraAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(remove_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            remove_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         self.ticket.refresh_from_db()
 
@@ -211,7 +246,10 @@ class SupportTicketExtraAPITests(APITestCase):
     def test_customer_cannot_add_tag_to_ticket(self):
         self.authenticate_customer()
 
-        url = reverse("support-ticket-add-tag", args=[self.ticket.pk])
+        url = reverse(
+            "support-ticket-add-tag",
+            args=[self.ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -221,7 +259,10 @@ class SupportTicketExtraAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
 
         self.ticket.refresh_from_db()
 
@@ -230,7 +271,10 @@ class SupportTicketExtraAPITests(APITestCase):
     def test_customer_can_upload_attachment_to_own_ticket(self):
         self.authenticate_customer()
 
-        url = reverse("support-ticket-attachments", args=[self.ticket.pk])
+        url = reverse(
+            "support-ticket-attachments",
+            args=[self.ticket.pk],
+        )
 
         uploaded_file = SimpleUploadedFile(
             "support-proof.txt",
@@ -246,14 +290,29 @@ class SupportTicketExtraAPITests(APITestCase):
             format="multipart",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         attachment = TicketAttachment.objects.get(ticket=self.ticket)
 
-        self.assertEqual(attachment.uploaded_by, self.customer)
-        self.assertEqual(attachment.original_filename, "support-proof.txt")
-        self.assertEqual(attachment.content_type, "text/plain")
-        self.assertGreater(attachment.size, 0)
+        self.assertEqual(
+            attachment.uploaded_by,
+            self.customer,
+        )
+        self.assertEqual(
+            attachment.original_filename,
+            "support-proof.txt",
+        )
+        self.assertEqual(
+            attachment.content_type,
+            "text/plain",
+        )
+        self.assertGreater(
+            attachment.size,
+            0,
+        )
 
         self.assertTrue(
             TicketAuditLog.objects.filter(
@@ -281,16 +340,26 @@ class SupportTicketExtraAPITests(APITestCase):
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-attachments", args=[self.ticket.pk])
+        url = reverse(
+            "support-ticket-attachments",
+            args=[self.ticket.pk],
+        )
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
+
         attachment_ids = {item["id"] for item in data}
 
-        self.assertIn(attachment.id, attachment_ids)
+        self.assertIn(
+            attachment.id,
+            attachment_ids,
+        )
 
     def test_customer_cannot_upload_attachment_to_other_customer_ticket(self):
         other_ticket = SupportTicket.objects.create(
@@ -303,7 +372,10 @@ class SupportTicketExtraAPITests(APITestCase):
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-attachments", args=[other_ticket.pk])
+        url = reverse(
+            "support-ticket-attachments",
+            args=[other_ticket.pk],
+        )
 
         uploaded_file = SimpleUploadedFile(
             "forbidden.txt",
@@ -319,11 +391,14 @@ class SupportTicketExtraAPITests(APITestCase):
             format="multipart",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
 
         self.assertFalse(TicketAttachment.objects.filter(ticket=other_ticket).exists())
 
-    def test_staff_can_list_audit_logs(self):
+    def test_support_agent_can_list_audit_logs(self):
         TicketAuditLog.log(
             ticket=self.ticket,
             actor=self.customer,
@@ -333,16 +408,28 @@ class SupportTicketExtraAPITests(APITestCase):
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-audit-logs", args=[self.ticket.pk])
+        url = reverse(
+            "support-ticket-audit-logs",
+            args=[self.ticket.pk],
+        )
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
 
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["action"], TicketAuditLog.ActionChoices.CREATED)
+        self.assertEqual(
+            len(data),
+            1,
+        )
+        self.assertEqual(
+            data[0]["action"],
+            TicketAuditLog.ActionChoices.CREATED,
+        )
 
     def test_customer_cannot_list_audit_logs(self):
         TicketAuditLog.log(
@@ -354,8 +441,14 @@ class SupportTicketExtraAPITests(APITestCase):
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-audit-logs", args=[self.ticket.pk])
+        url = reverse(
+            "support-ticket-audit-logs",
+            args=[self.ticket.pk],
+        )
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )

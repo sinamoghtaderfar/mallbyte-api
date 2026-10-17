@@ -6,6 +6,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import User
 from apps.support.models import SupportTicket
+from apps.support.tests.helpers import grant_support_agent
 
 
 class SupportTicketFilterTests(APITestCase):
@@ -36,15 +37,15 @@ class SupportTicketFilterTests(APITestCase):
             phone="+989950000001",
             email="support_filter_staff@example.com",
             full_name="Support Filter Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.support_staff)
 
         self.other_staff = self.create_test_user(
             phone="+989950000002",
             email="other_support_filter_staff@example.com",
             full_name="Other Support Filter Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.other_staff)
 
         self.customer = self.create_test_user(
             phone="+989950000003",
@@ -117,15 +118,27 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ids = self.get_ids(response)
 
-        self.assertNotIn(self.resolved_low_ticket.id, ids)
-        self.assertNotIn(self.open_high_ticket.id, ids)
-        self.assertNotIn(self.pending_urgent_ticket.id, ids)
+        self.assertNotIn(
+            self.resolved_low_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.open_high_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.pending_urgent_ticket.id,
+            ids,
+        )
 
-    def test_staff_can_filter_by_status(self):
+    def test_support_agent_can_filter_by_status(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
@@ -137,15 +150,27 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ids = self.get_ids(response)
 
-        self.assertIn(self.open_high_ticket.id, ids)
-        self.assertNotIn(self.pending_urgent_ticket.id, ids)
-        self.assertNotIn(self.resolved_low_ticket.id, ids)
+        self.assertIn(
+            self.open_high_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.pending_urgent_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.resolved_low_ticket.id,
+            ids,
+        )
 
-    def test_staff_can_filter_by_priority(self):
+    def test_support_agent_can_filter_by_priority(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
@@ -157,15 +182,27 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ids = self.get_ids(response)
 
-        self.assertIn(self.pending_urgent_ticket.id, ids)
-        self.assertNotIn(self.open_high_ticket.id, ids)
-        self.assertNotIn(self.resolved_low_ticket.id, ids)
+        self.assertIn(
+            self.pending_urgent_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.open_high_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.resolved_low_ticket.id,
+            ids,
+        )
 
-    def test_staff_can_filter_by_category(self):
+    def test_support_agent_can_filter_by_category(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
@@ -177,15 +214,27 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ids = self.get_ids(response)
 
-        self.assertIn(self.resolved_low_ticket.id, ids)
-        self.assertNotIn(self.open_high_ticket.id, ids)
-        self.assertNotIn(self.pending_urgent_ticket.id, ids)
+        self.assertIn(
+            self.resolved_low_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.open_high_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.pending_urgent_ticket.id,
+            ids,
+        )
 
-    def test_staff_can_filter_by_assigned_to_me(self):
+    def test_support_agent_can_filter_by_assigned_to_me(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
@@ -197,15 +246,27 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ids = self.get_ids(response)
 
-        self.assertIn(self.open_high_ticket.id, ids)
-        self.assertIn(self.resolved_low_ticket.id, ids)
-        self.assertNotIn(self.pending_urgent_ticket.id, ids)
+        self.assertIn(
+            self.open_high_ticket.id,
+            ids,
+        )
+        self.assertIn(
+            self.resolved_low_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.pending_urgent_ticket.id,
+            ids,
+        )
 
-    def test_staff_can_filter_by_customer(self):
+    def test_support_agent_can_filter_by_customer(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
@@ -217,15 +278,27 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ids = self.get_ids(response)
 
-        self.assertIn(self.resolved_low_ticket.id, ids)
-        self.assertNotIn(self.open_high_ticket.id, ids)
-        self.assertNotIn(self.pending_urgent_ticket.id, ids)
+        self.assertIn(
+            self.resolved_low_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.open_high_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            self.pending_urgent_ticket.id,
+            ids,
+        )
 
-    def test_staff_can_order_by_created_at_desc(self):
+    def test_support_agent_can_order_by_created_at_desc(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
@@ -237,8 +310,14 @@ class SupportTicketFilterTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         items = self.get_response_items(response)
 
-        self.assertGreaterEqual(len(items), 3)
+        self.assertGreaterEqual(
+            len(items),
+            3,
+        )

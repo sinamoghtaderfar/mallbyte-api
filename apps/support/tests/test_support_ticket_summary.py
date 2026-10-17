@@ -6,6 +6,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import User
 from apps.support.models import SupportTicket
+from apps.support.tests.helpers import grant_support_agent
 
 
 class SupportTicketSummaryTests(APITestCase):
@@ -36,15 +37,15 @@ class SupportTicketSummaryTests(APITestCase):
             phone="+989960000001",
             email="support_summary_staff@example.com",
             full_name="Support Summary Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.support_staff)
 
         self.other_staff = self.create_test_user(
             phone="+989960000002",
             email="other_support_summary_staff@example.com",
             full_name="Other Support Summary Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.other_staff)
 
         self.customer = self.create_test_user(
             phone="+989960000003",
@@ -107,61 +108,155 @@ class SupportTicketSummaryTests(APITestCase):
         self.authenticate_customer()
 
         url = reverse("support-ticket-summary")
-
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
 
-        self.assertEqual(data["status"]["total"], 2)
-        self.assertEqual(data["status"]["open"], 1)
-        self.assertEqual(data["status"]["pending"], 1)
-        self.assertEqual(data["status"]["resolved"], 0)
-        self.assertEqual(data["status"]["closed"], 0)
+        self.assertEqual(
+            data["status"]["total"],
+            2,
+        )
+        self.assertEqual(
+            data["status"]["open"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["pending"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["resolved"],
+            0,
+        )
+        self.assertEqual(
+            data["status"]["closed"],
+            0,
+        )
 
-        self.assertEqual(data["priority"]["high"], 1)
-        self.assertEqual(data["priority"]["urgent"], 1)
-        self.assertEqual(data["priority"]["low"], 0)
-        self.assertEqual(data["priority"]["normal"], 0)
+        self.assertEqual(
+            data["priority"]["high"],
+            1,
+        )
+        self.assertEqual(
+            data["priority"]["urgent"],
+            1,
+        )
+        self.assertEqual(
+            data["priority"]["low"],
+            0,
+        )
+        self.assertEqual(
+            data["priority"]["normal"],
+            0,
+        )
 
-        self.assertEqual(data["category"]["order"], 1)
-        self.assertEqual(data["category"]["payment"], 1)
-        self.assertEqual(data["category"]["product"], 0)
-        self.assertEqual(data["category"]["account"], 0)
+        self.assertEqual(
+            data["category"]["order"],
+            1,
+        )
+        self.assertEqual(
+            data["category"]["payment"],
+            1,
+        )
+        self.assertEqual(
+            data["category"]["product"],
+            0,
+        )
+        self.assertEqual(
+            data["category"]["account"],
+            0,
+        )
 
-        self.assertEqual(data["unassigned"], 1)
-        self.assertEqual(data["assigned_to_me"], 0)
+        self.assertEqual(
+            data["unassigned"],
+            1,
+        )
+        self.assertEqual(
+            data["assigned_to_me"],
+            0,
+        )
 
-    def test_staff_summary_counts_all_tickets(self):
+    def test_support_agent_summary_counts_all_tickets(self):
         self.authenticate_staff()
 
         url = reverse("support-ticket-summary")
-
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
 
-        self.assertEqual(data["status"]["total"], 4)
-        self.assertEqual(data["status"]["open"], 1)
-        self.assertEqual(data["status"]["pending"], 1)
-        self.assertEqual(data["status"]["resolved"], 1)
-        self.assertEqual(data["status"]["closed"], 1)
+        self.assertEqual(
+            data["status"]["total"],
+            4,
+        )
+        self.assertEqual(
+            data["status"]["open"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["pending"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["resolved"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["closed"],
+            1,
+        )
 
-        self.assertEqual(data["priority"]["high"], 1)
-        self.assertEqual(data["priority"]["urgent"], 1)
-        self.assertEqual(data["priority"]["low"], 1)
-        self.assertEqual(data["priority"]["normal"], 1)
+        self.assertEqual(
+            data["priority"]["high"],
+            1,
+        )
+        self.assertEqual(
+            data["priority"]["urgent"],
+            1,
+        )
+        self.assertEqual(
+            data["priority"]["low"],
+            1,
+        )
+        self.assertEqual(
+            data["priority"]["normal"],
+            1,
+        )
 
-        self.assertEqual(data["category"]["order"], 1)
-        self.assertEqual(data["category"]["payment"], 1)
-        self.assertEqual(data["category"]["product"], 1)
-        self.assertEqual(data["category"]["account"], 1)
+        self.assertEqual(
+            data["category"]["order"],
+            1,
+        )
+        self.assertEqual(
+            data["category"]["payment"],
+            1,
+        )
+        self.assertEqual(
+            data["category"]["product"],
+            1,
+        )
+        self.assertEqual(
+            data["category"]["account"],
+            1,
+        )
 
-        self.assertEqual(data["unassigned"], 1)
-        self.assertEqual(data["assigned_to_me"], 2)
+        self.assertEqual(
+            data["unassigned"],
+            1,
+        )
+        self.assertEqual(
+            data["assigned_to_me"],
+            2,
+        )
 
     def test_summary_respects_status_filter(self):
         self.authenticate_staff()
@@ -175,15 +270,33 @@ class SupportTicketSummaryTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
 
-        self.assertEqual(data["status"]["total"], 1)
-        self.assertEqual(data["status"]["open"], 1)
-        self.assertEqual(data["status"]["pending"], 0)
-        self.assertEqual(data["status"]["resolved"], 0)
-        self.assertEqual(data["status"]["closed"], 0)
+        self.assertEqual(
+            data["status"]["total"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["open"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["pending"],
+            0,
+        )
+        self.assertEqual(
+            data["status"]["resolved"],
+            0,
+        )
+        self.assertEqual(
+            data["status"]["closed"],
+            0,
+        )
 
     def test_summary_respects_assigned_to_me_filter(self):
         self.authenticate_staff()
@@ -197,15 +310,33 @@ class SupportTicketSummaryTests(APITestCase):
             },
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         data = response.json()
 
-        self.assertEqual(data["status"]["total"], 2)
-        self.assertEqual(data["status"]["open"], 1)
-        self.assertEqual(data["status"]["resolved"], 1)
-        self.assertEqual(data["assigned_to_me"], 2)
-        self.assertEqual(data["unassigned"], 0)
+        self.assertEqual(
+            data["status"]["total"],
+            2,
+        )
+        self.assertEqual(
+            data["status"]["open"],
+            1,
+        )
+        self.assertEqual(
+            data["status"]["resolved"],
+            1,
+        )
+        self.assertEqual(
+            data["assigned_to_me"],
+            2,
+        )
+        self.assertEqual(
+            data["unassigned"],
+            0,
+        )
 
     def test_anonymous_user_cannot_access_summary(self):
         url = reverse("support-ticket-summary")

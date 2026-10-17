@@ -9,6 +9,7 @@ from apps.accounts.models import User
 from apps.orders.models import Order
 from apps.products.models import Category, Product
 from apps.support.models import SupportTicket, TicketMessage
+from apps.support.tests.helpers import grant_support_agent
 
 
 class SupportTicketAPITests(APITestCase):
@@ -47,8 +48,8 @@ class SupportTicketAPITests(APITestCase):
             phone="+989930000002",
             email="support_staff@example.com",
             full_name="Support Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.support_staff)
 
         self.customer = self.create_test_user(
             phone="+989930000003",
@@ -163,7 +164,6 @@ class SupportTicketAPITests(APITestCase):
             data={
                 "subject": "Problem with my order",
                 "category": SupportTicket.CategoryChoices.ORDER,
-                "priority": SupportTicket.PriorityChoices.HIGH,
                 "order": self.order.pk,
                 "product": self.product.pk,
                 "initial_message": "My package arrived damaged.",
@@ -171,19 +171,43 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
-        ticket = SupportTicket.objects.get(customer=self.customer)
+        ticket = SupportTicket.objects.get(
+            customer=self.customer,
+        )
 
         self.assertTrue(ticket.ticket_number.startswith("SUP-"))
-        self.assertEqual(ticket.subject, "Problem with my order")
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.OPEN)
-        self.assertEqual(ticket.messages.count(), 1)
+        self.assertEqual(
+            ticket.subject,
+            "Problem with my order",
+        )
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.OPEN,
+        )
+        self.assertEqual(
+            ticket.priority,
+            SupportTicket.PriorityChoices.NORMAL,
+        )
+        self.assertEqual(
+            ticket.messages.count(),
+            1,
+        )
 
         message = ticket.messages.first()
 
-        self.assertEqual(message.sender, self.customer)
-        self.assertEqual(message.message, "My package arrived damaged.")
+        self.assertEqual(
+            message.sender,
+            self.customer,
+        )
+        self.assertEqual(
+            message.message,
+            "My package arrived damaged.",
+        )
 
     def test_customer_cannot_create_ticket_for_other_customer_order(self):
         self.authenticate_customer()
@@ -195,69 +219,111 @@ class SupportTicketAPITests(APITestCase):
             data={
                 "subject": "Wrong order ticket",
                 "category": SupportTicket.CategoryChoices.ORDER,
-                "priority": SupportTicket.PriorityChoices.NORMAL,
                 "order": self.other_order.pk,
                 "initial_message": "This should fail.",
             },
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(SupportTicket.objects.count(), 0)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(
+            SupportTicket.objects.count(),
+            0,
+        )
 
     def test_customer_only_sees_own_tickets(self):
-        own_ticket = self.create_ticket(customer=self.customer)
-        other_ticket = self.create_ticket(customer=self.other_customer)
+        own_ticket = self.create_ticket(
+            customer=self.customer,
+        )
+        other_ticket = self.create_ticket(
+            customer=self.other_customer,
+        )
 
         self.authenticate_customer()
 
         url = reverse("support-ticket-list")
-
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         items = self.get_response_items(response)
         ids = {item["id"] for item in items}
 
-        self.assertIn(own_ticket.id, ids)
-        self.assertNotIn(other_ticket.id, ids)
+        self.assertIn(
+            own_ticket.id,
+            ids,
+        )
+        self.assertNotIn(
+            other_ticket.id,
+            ids,
+        )
 
     def test_customer_cannot_retrieve_other_customer_ticket(self):
-        other_ticket = self.create_ticket(customer=self.other_customer)
+        other_ticket = self.create_ticket(
+            customer=self.other_customer,
+        )
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-detail", args=[other_ticket.pk])
+        url = reverse(
+            "support-ticket-detail",
+            args=[other_ticket.pk],
+        )
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
 
-    def test_staff_can_see_all_tickets(self):
-        own_ticket = self.create_ticket(customer=self.customer)
-        other_ticket = self.create_ticket(customer=self.other_customer)
+    def test_support_agent_can_see_all_tickets(self):
+        own_ticket = self.create_ticket(
+            customer=self.customer,
+        )
+        other_ticket = self.create_ticket(
+            customer=self.other_customer,
+        )
 
         self.authenticate_staff()
 
         url = reverse("support-ticket-list")
-
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         items = self.get_response_items(response)
         ids = {item["id"] for item in items}
 
-        self.assertIn(own_ticket.id, ids)
-        self.assertIn(other_ticket.id, ids)
+        self.assertIn(
+            own_ticket.id,
+            ids,
+        )
+        self.assertIn(
+            other_ticket.id,
+            ids,
+        )
 
     def test_customer_can_reply_to_own_ticket(self):
-        ticket = self.create_ticket(customer=self.customer)
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -267,21 +333,41 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.OPEN)
-        self.assertEqual(ticket.messages.count(), 2)
-        self.assertEqual(ticket.messages.last().sender, self.customer)
-        self.assertEqual(ticket.messages.last().message, "Here is more information.")
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.OPEN,
+        )
+        self.assertEqual(
+            ticket.messages.count(),
+            2,
+        )
+        self.assertEqual(
+            ticket.messages.last().sender,
+            self.customer,
+        )
+        self.assertEqual(
+            ticket.messages.last().message,
+            "Here is more information.",
+        )
 
-    def test_staff_reply_sets_ticket_to_pending(self):
-        ticket = self.create_ticket(customer=self.customer)
+    def test_support_agent_reply_sets_ticket_to_pending(self):
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -291,20 +377,37 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.PENDING)
-        self.assertEqual(ticket.messages.count(), 2)
-        self.assertEqual(ticket.messages.last().sender, self.support_staff)
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.PENDING,
+        )
+        self.assertEqual(
+            ticket.messages.count(),
+            2,
+        )
+        self.assertEqual(
+            ticket.messages.last().sender,
+            self.support_staff,
+        )
 
     def test_customer_cannot_create_internal_note(self):
-        ticket = self.create_ticket(customer=self.customer)
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -315,16 +418,27 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
 
-        self.assertEqual(ticket.messages.count(), 1)
+        self.assertEqual(
+            ticket.messages.count(),
+            1,
+        )
 
-    def test_staff_can_create_internal_note(self):
-        ticket = self.create_ticket(customer=self.customer)
+    def test_support_agent_can_create_internal_note(self):
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -335,19 +449,30 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.messages.count(), 2)
+        self.assertEqual(
+            ticket.messages.count(),
+            2,
+        )
 
         internal_note = ticket.messages.last()
 
         self.assertTrue(internal_note.is_internal_note)
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.OPEN)
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.OPEN,
+        )
 
     def test_customer_does_not_see_internal_notes(self):
-        ticket = self.create_ticket(customer=self.customer)
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         TicketMessage.objects.create(
             ticket=ticket,
@@ -358,23 +483,40 @@ class SupportTicketAPITests(APITestCase):
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-detail", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-detail",
+            args=[ticket.pk],
+        )
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         messages = response.json()["messages"]
 
-        self.assertEqual(len(messages), 1)
-        self.assertEqual(messages[0]["message"], "Initial message.")
+        self.assertEqual(
+            len(messages),
+            1,
+        )
+        self.assertEqual(
+            messages[0]["message"],
+            "Initial message.",
+        )
 
-    def test_staff_can_assign_ticket(self):
-        ticket = self.create_ticket(customer=self.customer)
+    def test_support_agent_can_assign_ticket(self):
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-assign", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-assign",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -384,18 +526,29 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.assigned_to, self.support_staff)
+        self.assertEqual(
+            ticket.assigned_to,
+            self.support_staff,
+        )
 
     def test_customer_cannot_assign_ticket(self):
-        ticket = self.create_ticket(customer=self.customer)
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-assign", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-assign",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -405,56 +558,105 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
 
         ticket.refresh_from_db()
 
         self.assertIsNone(ticket.assigned_to)
 
-    def test_staff_can_resolve_close_and_reopen_ticket(self):
-        ticket = self.create_ticket(customer=self.customer)
+    def test_support_agent_can_resolve_close_and_reopen_ticket(self):
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
 
         self.authenticate_staff()
 
-        resolve_url = reverse("support-ticket-resolve", args=[ticket.pk])
-        close_url = reverse("support-ticket-close", args=[ticket.pk])
-        reopen_url = reverse("support-ticket-reopen", args=[ticket.pk])
+        resolve_url = reverse(
+            "support-ticket-resolve",
+            args=[ticket.pk],
+        )
+        close_url = reverse(
+            "support-ticket-close",
+            args=[ticket.pk],
+        )
+        reopen_url = reverse(
+            "support-ticket-reopen",
+            args=[ticket.pk],
+        )
 
-        resolve_response = self.client.post(resolve_url, data={}, format="json")
+        resolve_response = self.client.post(
+            resolve_url,
+            data={},
+            format="json",
+        )
 
-        self.assertEqual(resolve_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            resolve_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.RESOLVED)
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.RESOLVED,
+        )
         self.assertIsNotNone(ticket.resolved_at)
 
-        close_response = self.client.post(close_url, data={}, format="json")
+        close_response = self.client.post(
+            close_url,
+            data={},
+            format="json",
+        )
 
-        self.assertEqual(close_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            close_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.CLOSED)
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.CLOSED,
+        )
         self.assertIsNotNone(ticket.closed_at)
 
-        reopen_response = self.client.post(reopen_url, data={}, format="json")
+        reopen_response = self.client.post(
+            reopen_url,
+            data={},
+            format="json",
+        )
 
-        self.assertEqual(reopen_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            reopen_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.status, SupportTicket.StatusChoices.OPEN)
+        self.assertEqual(
+            ticket.status,
+            SupportTicket.StatusChoices.OPEN,
+        )
         self.assertIsNone(ticket.resolved_at)
         self.assertIsNone(ticket.closed_at)
 
     def test_cannot_reply_to_closed_ticket(self):
-        ticket = self.create_ticket(customer=self.customer)
+        ticket = self.create_ticket(
+            customer=self.customer,
+        )
         ticket.close()
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -464,12 +666,21 @@ class SupportTicketAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
 
         data = response.json()
 
-        self.assertEqual(data["detail"], "Cannot reply to a closed ticket. Reopen it first.")
+        self.assertEqual(
+            data["detail"],
+            "Cannot reply to a closed ticket. Reopen it first.",
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.messages.count(), 1)
+        self.assertEqual(
+            ticket.messages.count(),
+            1,
+        )

@@ -17,6 +17,7 @@ from apps.support.notifications import create_support_notification
 from apps.support.permissions import (
     IsSupportStaff,
     IsTicketParticipantOrSupportStaff,
+    is_support_staff,
 )
 from apps.support.serializers import (
     SupportTagSerializer,
@@ -39,10 +40,16 @@ class SupportTagViewSet(viewsets.ModelViewSet):
 
         return [IsAuthenticated(), IsSupportStaff()]
 
+
 class SupportTicketViewSet(viewsets.ModelViewSet):
     serializer_class = SupportTicketSerializer
     permission_classes = [IsAuthenticated, IsTicketParticipantOrSupportStaff]
-    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
+    http_method_names = [
+        "get",
+        "post",
+        "head",
+        "options",
+    ]
 
     def get_queryset(self):
         user = self.request.user
@@ -59,7 +66,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             .all()
         )
 
-        if not (user.is_staff or user.is_superuser):
+        if not is_support_staff(user):
             queryset = queryset.filter(customer=user)
 
         status_filter = self.request.query_params.get("status")
@@ -89,10 +96,10 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         if assigned_to:
             if assigned_to == "me":
                 queryset = queryset.filter(assigned_to=user)
-            elif user.is_staff or user.is_superuser:
+            elif is_support_staff(user):
                 queryset = queryset.filter(assigned_to_id=assigned_to)
 
-        if customer and (user.is_staff or user.is_superuser):
+        if customer and is_support_staff(user):
             queryset = queryset.filter(customer_id=customer)
 
         allowed_ordering_fields = {
@@ -118,7 +125,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsSupportStaff()]
 
         return super().get_permissions()
-    
+
     @action(
         detail=False,
         methods=["get"],
@@ -216,7 +223,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
-        
+
     @action(
         detail=True,
         methods=["get", "post"],
@@ -346,6 +353,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         )
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
     @action(
         detail=True,
         methods=["post"],
@@ -385,9 +393,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
                 else TicketAuditLog.ActionChoices.REPLIED
             ),
             description=(
-                "Internal note created."
-                if is_internal_note
-                else "Ticket reply added."
+                "Internal note created." if is_internal_note else "Ticket reply added."
             ),
             metadata={
                 "message_id": message.pk,
@@ -400,7 +406,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             ticket.last_message_at = timezone.now()
             update_fields.append("last_message_at")
 
-            if request.user.is_staff or request.user.is_superuser:
+            if is_support_staff(request.user):
                 ticket.status = SupportTicket.StatusChoices.PENDING
             else:
                 ticket.status = SupportTicket.StatusChoices.OPEN
@@ -408,9 +414,9 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             update_fields.append("status")
 
         ticket.save(update_fields=update_fields)
-        
+
         if not is_internal_note:
-            if request.user.is_staff or request.user.is_superuser:
+            if is_support_staff(request.user):
                 create_support_notification(
                     user=ticket.customer,
                     ticket=ticket,
@@ -443,7 +449,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
         ticket.assigned_to = serializer.validated_data["assigned_to"]
         ticket.save(update_fields=["assigned_to", "updated_at"])
-        
+
         TicketAuditLog.log(
             ticket=ticket,
             actor=request.user,
@@ -453,7 +459,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
                 "assigned_to_id": ticket.assigned_to_id,
             },
         )
-        
+
         create_support_notification(
             user=ticket.assigned_to,
             ticket=ticket,
@@ -474,14 +480,14 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def resolve(self, request, pk=None):
         ticket = self.get_object()
         ticket.mark_resolved()
-        
+
         TicketAuditLog.log(
             ticket=ticket,
             actor=request.user,
             action=TicketAuditLog.ActionChoices.RESOLVED,
             description="Ticket resolved.",
         )
-        
+
         create_support_notification(
             user=ticket.customer,
             ticket=ticket,
@@ -528,14 +534,14 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def reopen(self, request, pk=None):
         ticket = self.get_object()
         ticket.reopen()
-        
+
         TicketAuditLog.log(
             ticket=ticket,
             actor=request.user,
             action=TicketAuditLog.ActionChoices.REOPENED,
             description="Ticket reopened.",
         )
-        
+
         create_support_notification(
             user=ticket.customer,
             ticket=ticket,

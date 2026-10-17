@@ -70,5 +70,17 @@
       "created_at": "2024-01-01T00:00:00Z",
       "updated_at": "2024-01-01T00:00:00Z"
     }
+  },
+  {
+  "model": "rbac.role",
+  "pk": 7,
+  "fields": {
+    "name": "support_agent",
+    "description": "Support Agent - Can manage customer support tickets",
+    "level": 60,
+    "is_system_role": true,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z"
+  }
   }
 ]

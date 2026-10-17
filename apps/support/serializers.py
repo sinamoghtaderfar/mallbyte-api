@@ -11,8 +11,10 @@ from apps.support.models import (
     TicketMessage,
 )
 from apps.support.notifications import create_support_notification
+from apps.support.permissions import is_support_staff
 
 User = get_user_model()
+
 
 class SupportTagSerializer(serializers.ModelSerializer):
     class Meta:
@@ -92,8 +94,13 @@ class TicketTagSerializer(serializers.Serializer):
     tag = serializers.PrimaryKeyRelatedField(
         queryset=SupportTag.objects.filter(is_active=True)
     )
+
+
 class TicketMessageSerializer(serializers.ModelSerializer):
-    sender_display = serializers.CharField(source="sender.full_name", read_only=True)
+    sender_display = serializers.CharField(
+        source="sender.full_name",
+        read_only=True,
+    )
 
     class Meta:
         model = TicketMessage
@@ -118,16 +125,33 @@ class TicketMessageSerializer(serializers.ModelSerializer):
 
 
 class SupportTicketSerializer(serializers.ModelSerializer):
-    customer_display = serializers.CharField(source="customer.full_name", read_only=True)
-    assigned_to_display = serializers.CharField(source="assigned_to.full_name", read_only=True)
+    customer_display = serializers.CharField(
+        source="customer.full_name",
+        read_only=True,
+    )
+
+    assigned_to_display = serializers.CharField(
+        source="assigned_to.full_name",
+        read_only=True,
+    )
+
     messages = serializers.SerializerMethodField()
-    initial_message = serializers.CharField(write_only=True, required=True)
+
+    initial_message = serializers.CharField(
+        write_only=True,
+        required=True,
+    )
+
     tags_detail = SupportTagSerializer(
         source="tags",
         many=True,
         read_only=True,
     )
-    attachments = TicketAttachmentSerializer(many=True, read_only=True)
+
+    attachments = TicketAttachmentSerializer(
+        many=True,
+        read_only=True,
+    )
 
     class Meta:
         model = SupportTicket
@@ -156,6 +180,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             "tags_detail",
             "attachments",
         ]
+
         read_only_fields = [
             "id",
             "ticket_number",
@@ -163,6 +188,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             "customer_display",
             "assigned_to",
             "assigned_to_display",
+            "priority",
             "status",
             "last_message_at",
             "resolved_at",
@@ -170,6 +196,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             "messages",
             "created_at",
             "updated_at",
+            "tags",
             "tags_detail",
             "attachments",
         ]
@@ -178,14 +205,13 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         messages = obj.messages.all()
 
-        if not (
-            request
-            and request.user.is_authenticated
-            and (request.user.is_staff or request.user.is_superuser)
-        ):
+        if not (request and is_support_staff(request.user)):
             messages = messages.filter(is_internal_note=False)
 
-        return TicketMessageSerializer(messages, many=True).data
+        return TicketMessageSerializer(
+            messages,
+            many=True,
+        ).data
 
     def validate(self, attrs):
         request = self.context.get("request")
@@ -196,23 +222,30 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         order = attrs.get("order")
         return_request = attrs.get("return_request")
 
-        if order and not (request.user.is_staff or request.user.is_superuser):
-            if order.user_id != request.user.id:
-                raise serializers.ValidationError(
-                    "You can only create tickets for your own orders."
-                )
+        if (
+            order
+            and not is_support_staff(request.user)
+            and order.user_id != request.user.id
+        ):
+            raise serializers.ValidationError(
+                "You can only create tickets for your own orders."
+            )
 
-        if return_request and not (request.user.is_staff or request.user.is_superuser):
-            if return_request.customer_id != request.user.id:
-                raise serializers.ValidationError(
-                    "You can only create tickets for your own return requests."
-                )
+        if (
+            return_request
+            and not is_support_staff(request.user)
+            and return_request.customer_id != request.user.id
+        ):
+            raise serializers.ValidationError(
+                "You can only create tickets for your own return requests."
+            )
 
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
         request = self.context["request"]
+
         initial_message = validated_data.pop("initial_message")
 
         ticket = SupportTicket.objects.create(
@@ -226,14 +259,14 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             sender=request.user,
             message=initial_message,
         )
-        
+
         TicketAuditLog.log(
             ticket=ticket,
             actor=request.user,
             action=TicketAuditLog.ActionChoices.CREATED,
             description="Support ticket created.",
         )
-        
+
         create_support_notification(
             user=ticket.customer,
             ticket=ticket,
@@ -246,17 +279,20 @@ class SupportTicketSerializer(serializers.ModelSerializer):
 
 class TicketReplySerializer(serializers.Serializer):
     message = serializers.CharField()
-    is_internal_note = serializers.BooleanField(required=False, default=False)
+
+    is_internal_note = serializers.BooleanField(
+        required=False,
+        default=False,
+    )
 
     def validate(self, attrs):
         request = self.context.get("request")
-        is_internal_note = attrs.get("is_internal_note", False)
+        is_internal_note = attrs.get(
+            "is_internal_note",
+            False,
+        )
 
-        if is_internal_note and not (
-            request
-            and request.user.is_authenticated
-            and (request.user.is_staff or request.user.is_superuser)
-        ):
+        if is_internal_note and not (request and is_support_staff(request.user)):
             raise serializers.ValidationError(
                 "Only support staff can create internal notes."
             )
@@ -266,5 +302,13 @@ class TicketReplySerializer(serializers.Serializer):
 
 class TicketAssignSerializer(serializers.Serializer):
     assigned_to = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.filter(is_staff=True)
+        queryset=User.objects.filter(is_active=True)
     )
+
+    def validate_assigned_to(self, user):
+        if not is_support_staff(user):
+            raise serializers.ValidationError(
+                "Assigned user must be an active support agent."
+            )
+
+        return user

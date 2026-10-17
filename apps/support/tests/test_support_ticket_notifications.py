@@ -6,10 +6,14 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import User
-from apps.notifications.models import Notification, NotificationPreference
+from apps.notifications.models import (
+    Notification,
+    NotificationPreference,
+)
 from apps.orders.models import Order
 from apps.products.models import Category, Product
 from apps.support.models import SupportTicket, TicketMessage
+from apps.support.tests.helpers import grant_support_agent
 
 
 class SupportTicketNotificationTests(APITestCase):
@@ -48,8 +52,8 @@ class SupportTicketNotificationTests(APITestCase):
             phone="+989940000002",
             email="support_notification_staff@example.com",
             full_name="Support Notification Staff",
-            is_staff=True,
         )
+        grant_support_agent(self.support_staff)
 
         self.customer = self.create_test_user(
             phone="+989940000003",
@@ -118,7 +122,14 @@ class SupportTicketNotificationTests(APITestCase):
 
         return ticket
 
-    def assert_support_notification_exists(self, *, user, ticket, title, template_key):
+    def assert_support_notification_exists(
+        self,
+        *,
+        user,
+        ticket,
+        title,
+        template_key,
+    ):
         self.assertTrue(
             Notification.objects.filter(
                 user=user,
@@ -140,7 +151,6 @@ class SupportTicketNotificationTests(APITestCase):
             data={
                 "subject": "Problem with my order",
                 "category": SupportTicket.CategoryChoices.ORDER,
-                "priority": SupportTicket.PriorityChoices.HIGH,
                 "order": self.order.pk,
                 "product": self.product.pk,
                 "initial_message": "My order arrived damaged.",
@@ -148,7 +158,10 @@ class SupportTicketNotificationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         ticket = SupportTicket.objects.get(customer=self.customer)
 
@@ -159,12 +172,15 @@ class SupportTicketNotificationTests(APITestCase):
             template_key="support_ticket_created",
         )
 
-    def test_staff_reply_creates_customer_notification(self):
+    def test_support_agent_reply_creates_customer_notification(self):
         ticket = self.create_ticket(assigned_to=self.support_staff)
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -174,7 +190,10 @@ class SupportTicketNotificationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         self.assert_support_notification_exists(
             user=self.customer,
@@ -183,12 +202,15 @@ class SupportTicketNotificationTests(APITestCase):
             template_key="support_ticket_staff_replied",
         )
 
-    def test_customer_reply_creates_assigned_staff_notification(self):
+    def test_customer_reply_creates_assigned_support_notification(self):
         ticket = self.create_ticket(assigned_to=self.support_staff)
 
         self.authenticate_customer()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -198,7 +220,10 @@ class SupportTicketNotificationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         self.assert_support_notification_exists(
             user=self.support_staff,
@@ -212,7 +237,10 @@ class SupportTicketNotificationTests(APITestCase):
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-reply", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-reply",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -223,7 +251,10 @@ class SupportTicketNotificationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         self.assertFalse(
             Notification.objects.filter(
@@ -236,12 +267,15 @@ class SupportTicketNotificationTests(APITestCase):
             ).exists()
         )
 
-    def test_assign_ticket_creates_staff_notification(self):
+    def test_assign_ticket_creates_support_agent_notification(self):
         ticket = self.create_ticket()
 
         self.authenticate_staff()
 
-        url = reverse("support-ticket-assign", args=[ticket.pk])
+        url = reverse(
+            "support-ticket-assign",
+            args=[ticket.pk],
+        )
 
         response = self.client.post(
             url,
@@ -251,11 +285,17 @@ class SupportTicketNotificationTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
 
         ticket.refresh_from_db()
 
-        self.assertEqual(ticket.assigned_to, self.support_staff)
+        self.assertEqual(
+            ticket.assigned_to,
+            self.support_staff,
+        )
 
         self.assert_support_notification_exists(
             user=self.support_staff,
@@ -269,12 +309,29 @@ class SupportTicketNotificationTests(APITestCase):
 
         self.authenticate_staff()
 
-        resolve_url = reverse("support-ticket-resolve", args=[ticket.pk])
-        close_url = reverse("support-ticket-close", args=[ticket.pk])
-        reopen_url = reverse("support-ticket-reopen", args=[ticket.pk])
+        resolve_url = reverse(
+            "support-ticket-resolve",
+            args=[ticket.pk],
+        )
+        close_url = reverse(
+            "support-ticket-close",
+            args=[ticket.pk],
+        )
+        reopen_url = reverse(
+            "support-ticket-reopen",
+            args=[ticket.pk],
+        )
 
-        resolve_response = self.client.post(resolve_url, data={}, format="json")
-        self.assertEqual(resolve_response.status_code, status.HTTP_200_OK)
+        resolve_response = self.client.post(
+            resolve_url,
+            data={},
+            format="json",
+        )
+
+        self.assertEqual(
+            resolve_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         self.assert_support_notification_exists(
             user=self.customer,
@@ -283,8 +340,16 @@ class SupportTicketNotificationTests(APITestCase):
             template_key="support_ticket_resolved",
         )
 
-        close_response = self.client.post(close_url, data={}, format="json")
-        self.assertEqual(close_response.status_code, status.HTTP_200_OK)
+        close_response = self.client.post(
+            close_url,
+            data={},
+            format="json",
+        )
+
+        self.assertEqual(
+            close_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         self.assert_support_notification_exists(
             user=self.customer,
@@ -293,8 +358,16 @@ class SupportTicketNotificationTests(APITestCase):
             template_key="support_ticket_closed",
         )
 
-        reopen_response = self.client.post(reopen_url, data={}, format="json")
-        self.assertEqual(reopen_response.status_code, status.HTTP_200_OK)
+        reopen_response = self.client.post(
+            reopen_url,
+            data={},
+            format="json",
+        )
+
+        self.assertEqual(
+            reopen_response.status_code,
+            status.HTTP_200_OK,
+        )
 
         self.assert_support_notification_exists(
             user=self.customer,
@@ -320,15 +393,17 @@ class SupportTicketNotificationTests(APITestCase):
             data={
                 "subject": "Muted support ticket",
                 "category": SupportTicket.CategoryChoices.ORDER,
-                "priority": SupportTicket.PriorityChoices.NORMAL,
                 "order": self.order.pk,
                 "product": self.product.pk,
-                "initial_message": "This should not create a notification.",
+                "initial_message": ("This should not create a notification."),
             },
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
 
         ticket = SupportTicket.objects.get(customer=self.customer)
 
