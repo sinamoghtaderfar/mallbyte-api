@@ -1,5 +1,6 @@
 from typing import cast
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
@@ -370,4 +371,40 @@ class SupportHardeningTests(APITestCase):
         self.assertEqual(
             self.ticket.status,
             SupportTicket.StatusChoices.CLOSED,
+        )
+
+    def test_customer_cannot_upload_attachment_to_closed_ticket(
+        self,
+    ):
+        self.ticket.close()
+
+        self.authenticate(self.customer)
+
+        url = reverse(
+            "support-ticket-attachments",
+            args=[self.ticket.pk],
+        )
+
+        uploaded_file = SimpleUploadedFile(
+            "closed-ticket.txt",
+            b"test attachment",
+            content_type="text/plain",
+        )
+
+        response = self.client.post(
+            url,
+            data={
+                "file": uploaded_file,
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertEqual(
+            self.ticket.attachments.count(),
+            0,
         )

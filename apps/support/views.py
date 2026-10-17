@@ -331,6 +331,16 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
+        if ticket.status == SupportTicket.StatusChoices.CLOSED:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot upload attachments to a closed "
+                        "ticket. Reopen it first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         serializer = TicketAttachmentSerializer(
             data=request.data,
             context={
