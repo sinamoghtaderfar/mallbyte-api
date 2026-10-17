@@ -60,7 +60,6 @@ INSTALLED_APPS = [
     "apps.analytics",
     "django_celery_beat",
     "apps.observability",
-    
 ]
 
 MIDDLEWARE = [
@@ -134,7 +133,6 @@ if DEBUG:
         }
 
 
-
 ####################
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -178,11 +176,11 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "config.pagination.StandardPageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
-#Reate limit settings for throttling
+# Reate limit settings for throttling
 REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
@@ -280,6 +278,7 @@ OBSERVABILITY_EXCLUDED_PATH_PREFIXES = [
     "/media/",
     "/favicon.ico",
 ]
+
 
 def env_bool(name, default=False):
     value = os.getenv(name)
