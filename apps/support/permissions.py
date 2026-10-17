@@ -161,8 +161,46 @@ class CanCloseSupportTickets(SupportPermission):
     permission_codename = CLOSE_SUPPORT_TICKETS
 
 
-class CanReopenSupportTickets(SupportPermission):
-    permission_codename = REOPEN_SUPPORT_TICKETS
+class CanReopenSupportTickets(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        return has_support_permission(
+            request.user,
+            REOPEN_SUPPORT_TICKETS,
+        ) or has_support_permission(
+            request.user,
+            VIEW_ALL_SUPPORT_TICKETS,
+        )
+
+    def has_object_permission(
+        self,
+        request,
+        view,
+        obj,
+    ):
+        # Managers / superusers with the global reopen
+        # permission can reopen any support ticket.
+        if has_support_permission(
+            request.user,
+            REOPEN_SUPPORT_TICKETS,
+        ):
+            return True
+
+        # A normal support agent may reopen only a ticket
+        # that is currently assigned to them.
+        return (
+            obj.assigned_to_id == request.user.id
+            and has_support_permission(
+                request.user,
+                VIEW_ALL_SUPPORT_TICKETS,
+            )
+            and has_support_permission(
+                request.user,
+                REPLY_SUPPORT_TICKETS,
+            )
+        )
 
 
 class CanViewSupportAuditLogs(SupportPermission):

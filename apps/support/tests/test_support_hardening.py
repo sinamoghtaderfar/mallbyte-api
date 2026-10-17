@@ -202,7 +202,11 @@ class SupportHardeningTests(APITestCase):
             status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
-        self.assertTrue(SupportTicket.objects.filter(pk=self.ticket.pk).exists())
+        self.assertTrue(
+            SupportTicket.objects.filter(
+                pk=self.ticket.pk,
+            ).exists()
+        )
 
     def test_customer_cannot_choose_priority_when_creating_ticket(
         self,
@@ -215,9 +219,9 @@ class SupportHardeningTests(APITestCase):
             url,
             data={
                 "subject": "Urgent please",
-                "category": (SupportTicket.CategoryChoices.OTHER),
-                "priority": (SupportTicket.PriorityChoices.URGENT),
-                "initial_message": ("Please make this urgent."),
+                "category": SupportTicket.CategoryChoices.OTHER,
+                "priority": SupportTicket.PriorityChoices.URGENT,
+                "initial_message": "Please make this urgent.",
             },
             format="json",
         )
@@ -227,7 +231,9 @@ class SupportHardeningTests(APITestCase):
             status.HTTP_201_CREATED,
         )
 
-        ticket = SupportTicket.objects.exclude(pk=self.ticket.pk).get()
+        ticket = SupportTicket.objects.exclude(
+            pk=self.ticket.pk,
+        ).get()
 
         self.assertEqual(
             ticket.priority,
@@ -245,8 +251,8 @@ class SupportHardeningTests(APITestCase):
             url,
             data={
                 "subject": "Trying tags",
-                "category": (SupportTicket.CategoryChoices.OTHER),
-                "initial_message": ("Test message."),
+                "category": SupportTicket.CategoryChoices.OTHER,
+                "initial_message": "Test message.",
                 "tags": [
                     self.tag.pk,
                 ],
@@ -259,7 +265,9 @@ class SupportHardeningTests(APITestCase):
             status.HTTP_201_CREATED,
         )
 
-        ticket = SupportTicket.objects.exclude(pk=self.ticket.pk).get()
+        ticket = SupportTicket.objects.exclude(
+            pk=self.ticket.pk,
+        ).get()
 
         self.assertFalse(ticket.tags.exists())
 
@@ -289,3 +297,77 @@ class SupportHardeningTests(APITestCase):
         self.ticket.refresh_from_db()
 
         self.assertIsNone(self.ticket.assigned_to)
+
+    def test_assigned_support_agent_can_reopen_closed_ticket(
+        self,
+    ):
+        self.ticket.assigned_to = self.support_agent
+        self.ticket.save(
+            update_fields=[
+                "assigned_to",
+                "updated_at",
+            ]
+        )
+
+        self.ticket.close()
+
+        self.authenticate(self.support_agent)
+
+        url = reverse(
+            "support-ticket-reopen",
+            args=[self.ticket.pk],
+        )
+
+        response = self.client.post(
+            url,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.status,
+            SupportTicket.StatusChoices.OPEN,
+        )
+
+    def test_support_agent_cannot_reopen_ticket_assigned_to_someone_else(
+        self,
+    ):
+        self.ticket.assigned_to = self.support_manager
+        self.ticket.save(
+            update_fields=[
+                "assigned_to",
+                "updated_at",
+            ]
+        )
+
+        self.ticket.close()
+
+        self.authenticate(self.support_agent)
+
+        url = reverse(
+            "support-ticket-reopen",
+            args=[self.ticket.pk],
+        )
+
+        response = self.client.post(
+            url,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.status,
+            SupportTicket.StatusChoices.CLOSED,
+        )
