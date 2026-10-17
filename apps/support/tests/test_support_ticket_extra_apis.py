@@ -16,7 +16,7 @@ from apps.support.models import (
     TicketAuditLog,
     TicketMessage,
 )
-from apps.support.tests.helpers import grant_support_agent
+from apps.support.tests.helpers import grant_support_manager
 
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
 
@@ -59,7 +59,7 @@ class SupportTicketExtraAPITests(APITestCase):
             email="support_extra_staff@example.com",
             full_name="Support Extra Staff",
         )
-        grant_support_agent(self.support_staff)
+        grant_support_manager(self.support_staff)
 
         self.customer = self.create_test_user(
             phone="+989970000002",

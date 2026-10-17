@@ -6,7 +6,10 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import User
 from apps.support.models import SupportTag, SupportTicket
-from apps.support.tests.helpers import grant_support_agent
+from apps.support.tests.helpers import (
+    grant_support_agent,
+    grant_support_manager,
+)
 
 
 class SupportHardeningTests(APITestCase):
@@ -30,6 +33,13 @@ class SupportHardeningTests(APITestCase):
             full_name="Support Agent",
         )
         grant_support_agent(self.support_agent)
+
+        self.support_manager = self.create_user(
+            phone="+989910000004",
+            email="support-manager@example.com",
+            full_name="Support Manager",
+        )
+        grant_support_manager(self.support_manager)
 
         self.ticket = SupportTicket.objects.create(
             customer=self.customer,
@@ -56,18 +66,48 @@ class SupportHardeningTests(APITestCase):
             is_active=True,
             is_staff=is_staff,
         )
+
         user.set_password("testpass123")
         user.save()
+
         return user
 
     def get_api_client(self) -> APIClient:
-        return cast(APIClient, self.client)
+        return cast(
+            APIClient,
+            self.client,
+        )
 
     def authenticate(self, user):
         self.get_api_client().force_authenticate(user=user)
 
     def test_regular_django_staff_is_not_support_staff(self):
         self.authenticate(self.regular_staff)
+
+        url = reverse(
+            "support-ticket-assign",
+            args=[self.ticket.pk],
+        )
+
+        response = self.client.post(
+            url,
+            data={
+                "assigned_to": self.support_manager.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertIsNone(self.ticket.assigned_to)
+
+    def test_support_agent_cannot_assign_ticket(self):
+        self.authenticate(self.support_agent)
 
         url = reverse(
             "support-ticket-assign",
@@ -91,8 +131,8 @@ class SupportHardeningTests(APITestCase):
 
         self.assertIsNone(self.ticket.assigned_to)
 
-    def test_support_agent_role_can_manage_ticket(self):
-        self.authenticate(self.support_agent)
+    def test_support_manager_can_assign_ticket(self):
+        self.authenticate(self.support_manager)
 
         url = reverse(
             "support-ticket-assign",
@@ -164,7 +204,9 @@ class SupportHardeningTests(APITestCase):
 
         self.assertTrue(SupportTicket.objects.filter(pk=self.ticket.pk).exists())
 
-    def test_customer_cannot_choose_priority_when_creating_ticket(self):
+    def test_customer_cannot_choose_priority_when_creating_ticket(
+        self,
+    ):
         self.authenticate(self.customer)
 
         url = reverse("support-ticket-list")
@@ -173,9 +215,9 @@ class SupportHardeningTests(APITestCase):
             url,
             data={
                 "subject": "Urgent please",
-                "category": SupportTicket.CategoryChoices.OTHER,
-                "priority": SupportTicket.PriorityChoices.URGENT,
-                "initial_message": "Please make this urgent.",
+                "category": (SupportTicket.CategoryChoices.OTHER),
+                "priority": (SupportTicket.PriorityChoices.URGENT),
+                "initial_message": ("Please make this urgent."),
             },
             format="json",
         )
@@ -185,16 +227,16 @@ class SupportHardeningTests(APITestCase):
             status.HTTP_201_CREATED,
         )
 
-        ticket = SupportTicket.objects.exclude(
-            pk=self.ticket.pk,
-        ).get()
+        ticket = SupportTicket.objects.exclude(pk=self.ticket.pk).get()
 
         self.assertEqual(
             ticket.priority,
             SupportTicket.PriorityChoices.NORMAL,
         )
 
-    def test_customer_cannot_assign_tags_during_ticket_creation(self):
+    def test_customer_cannot_assign_tags_during_ticket_creation(
+        self,
+    ):
         self.authenticate(self.customer)
 
         url = reverse("support-ticket-list")
@@ -203,8 +245,8 @@ class SupportHardeningTests(APITestCase):
             url,
             data={
                 "subject": "Trying tags",
-                "category": SupportTicket.CategoryChoices.OTHER,
-                "initial_message": "Test message.",
+                "category": (SupportTicket.CategoryChoices.OTHER),
+                "initial_message": ("Test message."),
                 "tags": [
                     self.tag.pk,
                 ],
@@ -217,14 +259,14 @@ class SupportHardeningTests(APITestCase):
             status.HTTP_201_CREATED,
         )
 
-        ticket = SupportTicket.objects.exclude(
-            pk=self.ticket.pk,
-        ).get()
+        ticket = SupportTicket.objects.exclude(pk=self.ticket.pk).get()
 
         self.assertFalse(ticket.tags.exists())
 
-    def test_ticket_cannot_be_assigned_to_regular_staff_user(self):
-        self.authenticate(self.support_agent)
+    def test_ticket_cannot_be_assigned_to_regular_staff_user(
+        self,
+    ):
+        self.authenticate(self.support_manager)
 
         url = reverse(
             "support-ticket-assign",

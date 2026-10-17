@@ -13,7 +13,7 @@ from apps.notifications.models import (
 from apps.orders.models import Order
 from apps.products.models import Category, Product
 from apps.support.models import SupportTicket, TicketMessage
-from apps.support.tests.helpers import grant_support_agent
+from apps.support.tests.helpers import grant_support_manager
 
 
 class SupportTicketNotificationTests(APITestCase):
@@ -53,7 +53,7 @@ class SupportTicketNotificationTests(APITestCase):
             email="support_notification_staff@example.com",
             full_name="Support Notification Staff",
         )
-        grant_support_agent(self.support_staff)
+        grant_support_manager(self.support_staff)
 
         self.customer = self.create_test_user(
             phone="+989940000003",

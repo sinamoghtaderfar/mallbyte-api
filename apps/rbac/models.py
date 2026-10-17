@@ -61,6 +61,7 @@ class Permission(models.Model):
             ("reviews", "Reviews"),
             ("shipping", "Shipping"),
             ("content", "Content"),
+            ("support", "Support"),
             ("rbac", "RBAC"),
         ],
     )

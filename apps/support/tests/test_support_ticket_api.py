@@ -9,7 +9,7 @@ from apps.accounts.models import User
 from apps.orders.models import Order
 from apps.products.models import Category, Product
 from apps.support.models import SupportTicket, TicketMessage
-from apps.support.tests.helpers import grant_support_agent
+from apps.support.tests.helpers import grant_support_manager
 
 
 class SupportTicketAPITests(APITestCase):
@@ -49,7 +49,7 @@ class SupportTicketAPITests(APITestCase):
             email="support_staff@example.com",
             full_name="Support Staff",
         )
-        grant_support_agent(self.support_staff)
+        grant_support_manager(self.support_staff)
 
         self.customer = self.create_test_user(
             phone="+989930000003",

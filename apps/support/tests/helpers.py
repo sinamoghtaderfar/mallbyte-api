@@ -3,14 +3,18 @@ from apps.rbac.utils import assign_role
 
 
 def grant_support_agent(user):
-    role, _ = Role.objects.get_or_create(
-        name="support_agent",
-        defaults={
-            "description": "Support Agent - Can manage customer support tickets",
-            "level": 60,
-            "is_system_role": True,
-        },
+    role = Role.objects.get(name="support_agent")
+
+    assign_role(
+        user,
+        role,
     )
+
+    return user
+
+
+def grant_support_manager(user):
+    role = Role.objects.get(name="support_manager")
 
     assign_role(
         user,

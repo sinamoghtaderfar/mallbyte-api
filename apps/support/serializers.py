@@ -11,7 +11,14 @@ from apps.support.models import (
     TicketMessage,
 )
 from apps.support.notifications import create_support_notification
-from apps.support.permissions import is_support_staff
+from apps.support.permissions import (
+    ADD_SUPPORT_INTERNAL_NOTE,
+    REPLY_SUPPORT_TICKETS,
+    VIEW_SUPPORT_INTERNAL_NOTES,
+    can_be_assigned_support_ticket,
+    has_support_permission,
+    is_support_staff,
+)
 
 User = get_user_model()
 
@@ -205,7 +212,15 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         messages = obj.messages.all()
 
-        if not (request and is_support_staff(request.user)):
+        can_view_internal_notes = bool(
+            request
+            and has_support_permission(
+                request.user,
+                VIEW_SUPPORT_INTERNAL_NOTES,
+            )
+        )
+
+        if not can_view_internal_notes:
             messages = messages.filter(is_internal_note=False)
 
         return TicketMessageSerializer(
@@ -228,7 +243,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             and order.user_id != request.user.id
         ):
             raise serializers.ValidationError(
-                "You can only create tickets for your own orders."
+                "You can only create tickets " "for your own orders."
             )
 
         if (
@@ -237,7 +252,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             and return_request.customer_id != request.user.id
         ):
             raise serializers.ValidationError(
-                "You can only create tickets for your own return requests."
+                "You can only create tickets " "for your own return requests."
             )
 
         return attrs
@@ -263,7 +278,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         TicketAuditLog.log(
             ticket=ticket,
             actor=request.user,
-            action=TicketAuditLog.ActionChoices.CREATED,
+            action=(TicketAuditLog.ActionChoices.CREATED),
             description="Support ticket created.",
         )
 
@@ -287,14 +302,35 @@ class TicketReplySerializer(serializers.Serializer):
 
     def validate(self, attrs):
         request = self.context.get("request")
+        ticket = self.context.get("ticket")
+
+        if request is None or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication is required.")
+
         is_internal_note = attrs.get(
             "is_internal_note",
             False,
         )
 
-        if is_internal_note and not (request and is_support_staff(request.user)):
+        if is_internal_note:
+            if not has_support_permission(
+                request.user,
+                ADD_SUPPORT_INTERNAL_NOTE,
+            ):
+                raise serializers.ValidationError(
+                    "You do not have permission " "to create internal notes."
+                )
+
+            return attrs
+
+        is_customer_reply = bool(ticket and ticket.customer_id == request.user.id)
+
+        if not is_customer_reply and not has_support_permission(
+            request.user,
+            REPLY_SUPPORT_TICKETS,
+        ):
             raise serializers.ValidationError(
-                "Only support staff can create internal notes."
+                "You do not have permission " "to reply to this ticket."
             )
 
         return attrs
@@ -306,9 +342,13 @@ class TicketAssignSerializer(serializers.Serializer):
     )
 
     def validate_assigned_to(self, user):
-        if not is_support_staff(user):
+        if not can_be_assigned_support_ticket(user):
             raise serializers.ValidationError(
-                "Assigned user must be an active support agent."
+                "Assigned user must have support " "ticket view and reply permissions."
             )
 
         return user
+
+
+class TicketPrioritySerializer(serializers.Serializer):
+    priority = serializers.ChoiceField(choices=SupportTicket.PriorityChoices.choices)

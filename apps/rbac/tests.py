@@ -23,6 +23,7 @@ from .utils import (
     clear_role_permissions_cache,
     clear_user_permissions_cache,
     get_client_ip,
+    get_permissions_cache_key,
     get_user_permissions,
     get_user_roles,
     has_permission,
@@ -299,24 +300,49 @@ class RBACUtilsTestCase(RBACTestMixin, TestCase):
         self.assertFalse(has_permission(self.user, "missing_permission"))
 
     def test_clear_user_permissions_cache(self):
+        cache_key = get_permissions_cache_key(self.user)
+
+        cache.set(
+            cache_key,
+            ["view_products"],
+            3600,
+        )
+
+        self.assertEqual(
+            cache.get(cache_key),
+            ["view_products"],
+        )
+
+        clear_user_permissions_cache(self.user)
+
+        self.assertIsNone(cache.get(cache_key))
+
+    def test_role_permission_change_invalidates_user_permissions_cache(self):
         RolePermission.objects.create(
             role=self.role,
             permission=self.permission,
         )
-        assign_role(self.user, self.role, self.admin)
 
-        self.assertIn("view_products", get_user_permissions(self.user))
+        assign_role(
+            self.user,
+            self.role,
+            self.admin,
+        )
+
+        self.assertIn(
+            "view_products",
+            get_user_permissions(self.user),
+        )
 
         RolePermission.objects.filter(
             role=self.role,
             permission=self.permission,
         ).delete()
 
-        self.assertIn("view_products", get_user_permissions(self.user))
-
-        clear_user_permissions_cache(self.user)
-
-        self.assertNotIn("view_products", get_user_permissions(self.user))
+        self.assertNotIn(
+            "view_products",
+            get_user_permissions(self.user),
+        )
 
     def test_clear_role_permissions_cache(self):
         RolePermission.objects.create(
@@ -536,7 +562,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
             return response.data["results"]
 
         return response.data
-    
+
     def test_non_admin_cannot_access_roles(self):
         self.authenticate(self.user)
 
@@ -560,9 +586,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
         items = self.get_response_items(response)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(
-            any(role["name"] == "manager" for role in items)
-        )
+        self.assertTrue(any(role["name"] == "manager" for role in items))
 
     def test_super_admin_can_create_role(self):
         self.authenticate(self.admin)
@@ -635,9 +659,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
         items = self.get_response_items(response)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(
-            all(permission["module"] == "products" for permission in items)
-        )
+        self.assertTrue(all(permission["module"] == "products" for permission in items))
 
     def test_super_admin_can_create_permission(self):
         self.authenticate(self.admin)
@@ -654,9 +676,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(
-            Permission.objects.filter(codename="create_product").exists()
-        )
+        self.assertTrue(Permission.objects.filter(codename="create_product").exists())
 
     def test_role_permissions_action_lists_permissions(self):
         RolePermission.objects.create(
@@ -828,9 +848,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
     def test_remove_role_endpoint_returns_404_for_missing_data(self):
         self.authenticate(self.admin)
 
-        response = self.client.delete(
-            f"/api/rbac/remove-role/999999/{self.role.id}/"
-        )
+        response = self.client.delete(f"/api/rbac/remove-role/999999/{self.role.id}/")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -930,10 +948,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(
-            any(
-                user_role["user_email"] == self.user.email
-                for user_role in items
-            )
+            any(user_role["user_email"] == self.user.email for user_role in items)
         )
 
     def test_user_roles_endpoint_filters_by_user_id(self):
@@ -946,9 +961,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
         items = self.get_response_items(response)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(
-            all(user_role["user"] == self.user.id for user_role in items)
-        )
+        self.assertTrue(all(user_role["user"] == self.user.id for user_role in items))
 
     def test_admin_logs_endpoint_lists_logs(self):
         log_admin_action(
@@ -987,9 +1000,7 @@ class RBACAPITestCase(RBACTestMixin, APITestCase):
         items = self.get_response_items(response)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(
-            all(log["action"] == "assign_role" for log in items)
-        )
+        self.assertTrue(all(log["action"] == "assign_role" for log in items))
 
     def test_admin_log_detail_endpoint(self):
         log = log_admin_action(

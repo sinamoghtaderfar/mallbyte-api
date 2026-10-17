@@ -45,6 +45,8 @@ class SupportTag(models.Model):
             self.slug = slug
 
         super().save(*args, **kwargs)
+
+
 class SupportTicket(models.Model):
     class StatusChoices(models.TextChoices):
         OPEN = "open", "Open"
@@ -110,7 +112,7 @@ class SupportTicket(models.Model):
         default=StatusChoices.OPEN,
         db_index=True,
     )
-    
+
     tags = models.ManyToManyField(
         SupportTag,
         related_name="tickets",
@@ -229,7 +231,8 @@ class TicketMessage(models.Model):
 
     def __str__(self):
         return f"Message on {self.ticket.ticket_number} by {self.sender}"
-    
+
+
 class TicketAttachment(models.Model):
     ticket = models.ForeignKey(
         SupportTicket,
@@ -293,7 +296,11 @@ class TicketAuditLog(models.Model):
         REOPENED = "reopened", "Reopened"
         ATTACHMENT_ADDED = "attachment_added", "Attachment Added"
         TAG_ADDED = "tag_added", "Tag Added"
-        TAG_REMOVED = "tag_removed", "Tag Removed"
+        TAG_REMOVED = (
+            "tag_removed",
+            "Tag Removed",
+        )
+        PRIORITY_CHANGED = "priority_changed", "Priority Changed"
 
     ticket = models.ForeignKey(
         SupportTicket,
