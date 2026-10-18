@@ -6,6 +6,7 @@ from django.db.models import Avg, Count, F, Q, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
+from apps.analytics.financial_reporting import get_reporting_financial
 from apps.content.models import Announcement, Banner, ContentPage, FAQItem
 from apps.inventory.models import Stock
 from apps.orders.models import Order, OrderItem
@@ -497,6 +498,9 @@ def get_dashboard_analytics(*, period="month", start_date=None, end_date=None):
             "end_at": end_at.isoformat() if end_at else None,
         },
         "sales": get_sales_summary(start_at, end_at),
+        "financial": get_reporting_financial(
+            period=period, start_date=start_date, end_date=end_date,
+        ),
         "orders": get_order_summary(start_at, end_at),
         "payments": get_payment_summary(start_at, end_at),
         "products": get_product_inventory_summary(start_at, end_at),
@@ -673,6 +677,10 @@ def get_analytics_timeseries(*, period="month", start_date=None, end_date=None):
             "new_users_count": total_new_users,
         },
         "points": points,
+        "financial": get_reporting_financial(
+            period=period, start_date=start_date, end_date=end_date,
+            include_series=True,
+        ),
     }
     
 def get_order_status_breakdown(start_at, end_at):
@@ -870,6 +878,10 @@ def get_analytics_breakdown(*, period="month", start_date=None, end_date=None, l
             "limit": limit,
         },
         "orders_by_status": get_order_status_breakdown(start_at, end_at),
+        "financial": get_reporting_financial(
+            period=period, start_date=start_date, end_date=end_date,
+            include_providers=True,
+        ),
         "payments_by_provider": get_payment_provider_breakdown(start_at, end_at),
         "revenue_by_category": get_revenue_by_category_breakdown(
             start_at,
