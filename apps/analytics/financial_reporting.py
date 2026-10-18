@@ -1,6 +1,7 @@
 """Currency-safe financial reporting for analytics endpoints."""
 
 from datetime import datetime, timedelta
+from django.conf import settings
 from decimal import Decimal
 
 from django.db.models import Count, F, Sum
@@ -26,19 +27,31 @@ def _grouped_events(
     statuses,
     dimension,
 ):
-    queryset = filter_event_window(
-        Payment.objects.filter(status__in=statuses),
-        field_name=field_name,
-        window=window,
-    )
+    if field_name == "refunded_at" and getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+        from apps.settlements.models import ConfirmedRefund
+        queryset = filter_event_window(
+            ConfirmedRefund.objects.all(),
+            field_name="confirmed_at",
+            window=window,
+        )
+        event_field = "confirmed_at"
+        provider_field = "payment__provider"
+    else:
+        queryset = filter_event_window(
+            Payment.objects.filter(status__in=statuses),
+            field_name=field_name,
+            window=window,
+        )
+        event_field = field_name
+        provider_field = "provider"
 
     group_expression = (
         TruncDate(
-            field_name,
+            event_field,
             tzinfo=timezone.get_current_timezone(),
         )
         if dimension == "date"
-        else F("provider")
+        else F(provider_field)
     )
 
     return (

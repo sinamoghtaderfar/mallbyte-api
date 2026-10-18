@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
@@ -739,6 +740,11 @@ class CheckoutSerializer(serializers.Serializer):
                     order=order,
                 )
                 order.refresh_from_db()
+
+            if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+                from apps.settlements.services import build_order_allocations
+
+                build_order_allocations(order, currency="IRR")
 
             OrderStatusHistory.objects.create(
                 order=order,

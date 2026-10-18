@@ -8,6 +8,7 @@ Trust boundaries:
 """
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -320,6 +321,13 @@ def post_confirmed_payout(*, seller_id, currency, amount, external_reference, id
         return replay
     if ConfirmedPayout.objects.filter(external_reference=external_reference).exists():
         raise ValidationError("Duplicate external payout reference.")
+    if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+        from apps.settlements.settlement_policy import payout_eligibility
+        eligible = payout_eligibility(seller_id, currency)
+        if Decimal(eligible["withdrawable_amount"]) < amount:
+            raise ValidationError(
+                "Payout exceeds eligible released balance. Reconcile with bank before posting."
+            )
     if seller_balance(seller_id, currency) < amount:
         # A transfer might already have occurred externally. Never silently ignore
         # it; it needs manual reconciliation before recording.

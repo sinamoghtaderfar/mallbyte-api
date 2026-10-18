@@ -277,14 +277,14 @@ class Order(models.Model):
 
         self.total_amount = total
 
-    def mark_paid(self):
+    def mark_paid(self, paid_at=None):
         """
         Mark order as paid.
         Payment app will use this later.
         """
         self.status = self.StatusChoices.PAID
         self.payment_status = self.PaymentStatusChoices.PAID
-        self.paid_at = timezone.now()
+        self.paid_at = paid_at or timezone.now()
         self.save(
             update_fields=[
                 "status",
