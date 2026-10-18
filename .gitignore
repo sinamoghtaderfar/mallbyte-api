@@ -39,7 +39,7 @@ __pycache__/
 *_export.csv
 *_export.xlsx
 media/
-
+/scripts/
 # Docker local environment
 .env.docker
 mallbyte_docker_backup.sql
