@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from django.conf import settings
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -190,14 +191,22 @@ def get_financial_cashflow(
 
     # A refund is recognized as a cash outflow on refunded_at.
     # Status REFUNDED is treated as a full-payment reversal.
-    refunded_payments = Payment.objects.filter(
-        status=Payment.StatusChoices.REFUNDED,
-    )
-    refunded_payments = filter_event_window(
-        refunded_payments,
-        field_name="refunded_at",
-        window=window,
-    )
+    if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+        from apps.settlements.models import ConfirmedRefund
+        refunded_payments = filter_event_window(
+            ConfirmedRefund.objects.all(),
+            field_name="confirmed_at",
+            window=window,
+        )
+    else:
+        refunded_payments = Payment.objects.filter(
+            status=Payment.StatusChoices.REFUNDED,
+        )
+        refunded_payments = filter_event_window(
+            refunded_payments,
+            field_name="refunded_at",
+            window=window,
+        )
 
     buckets = {}
 

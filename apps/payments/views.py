@@ -1,5 +1,6 @@
 # apps/payments/views.py
 
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -112,6 +113,12 @@ class PaymentViewSet(
         For now this is a mock/manual success action.
         Later, real payment gateway callback can call the same logic.
         """
+
+        if not getattr(settings, "SETTLEMENTS_ALLOW_MOCK_SUCCESS", False):
+            return Response(
+                {"detail": "Direct mock success is disabled. Use a verified payment integration."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         payment = self.get_object()
         old_status = payment.status

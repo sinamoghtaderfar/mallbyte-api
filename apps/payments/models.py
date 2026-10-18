@@ -131,6 +131,14 @@ class Payment(models.Model):
                 condition=Q(status="success"),
                 name="unique_successful_payment_per_order",
             ),
+            models.UniqueConstraint(
+                fields=["provider", "gateway_reference"],
+                condition=Q(
+                    status__in=("success", "refunded"),
+                    gateway_reference__gt="",
+                ),
+                name="unique_provider_verified_capture_reference",
+            ),
         ]
 
     def __str__(self):
@@ -152,7 +160,7 @@ class Payment(models.Model):
         random_code = uuid.uuid4().hex[:6].upper()
         return f"PAY-{today}-{random_code}"
 
-    def mark_success(self, gateway_reference="", gateway_response=None):
+    def mark_success(self, gateway_reference="", gateway_response=None, confirmed_at=None):
         """Complete a pending payment exactly once per order."""
 
         if gateway_response is None:
@@ -217,7 +225,9 @@ class Payment(models.Model):
                     notes=f"Payment success: {payment.payment_number}",
                 )
 
-            now = timezone.now()
+            now = confirmed_at or timezone.now()
+            if timezone.is_naive(now):
+                raise ValidationError("Capture timestamp must be timezone-aware.")
 
             payment.status = self.StatusChoices.SUCCESS
             payment.gateway_reference = gateway_reference
@@ -233,7 +243,12 @@ class Payment(models.Model):
                 ]
             )
 
-            order.mark_paid()
+            order.mark_paid(paid_at=now)
+
+            if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+                from apps.settlements.services import post_captured_payment
+
+                post_captured_payment(payment)
 
             # Record independent fulfillment for each seller in this order.
             seller_ids = order.items.values_list(

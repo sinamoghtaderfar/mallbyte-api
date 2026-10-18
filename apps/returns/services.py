@@ -431,6 +431,18 @@ def mark_return_refunded(*, return_request, user, note=""):
     ]:
         raise ValidationError("This return request cannot be marked as refunded.")
 
+    from django.conf import settings
+    if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+        from django.db.models import Sum
+        from apps.settlements.models import ConfirmedRefund
+        verified = ConfirmedRefund.objects.filter(
+            return_request_id=return_request.pk,
+        ).aggregate(amount=Sum("amount"))["amount"] or Decimal("0")
+        if verified < return_request.total_approved_amount:
+            raise ValidationError(
+                "The approved return amount has not been fully confirmed by the payment processor."
+            )
+
     old_status = return_request.status
 
     return_request.status = ReturnRequest.Status.REFUNDED
