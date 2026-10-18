@@ -1,23 +1,20 @@
 from rest_framework import permissions
 
+from apps.accounts.models import Seller
 from apps.rbac.utils import has_permission
 
 VIEW_PLATFORM_ANALYTICS = "view_platform_analytics"
 EXPORT_ANALYTICS = "export_analytics"
 MANAGE_ANALYTICS_REPORTS = "manage_analytics_reports"
 MANAGE_ANALYTICS_SCHEDULES = "manage_analytics_schedules"
+VIEW_SELLER_ANALYTICS = "view_seller_analytics"
 
 
 def has_analytics_permission(user, codename):
-    if not user:
+    if not user or not user.is_authenticated or not user.is_active:
         return False
-
-    if not user.is_authenticated:
+    if user.is_deleted:
         return False
-
-    if not user.is_active:
-        return False
-
     return has_permission(user, codename)
 
 
@@ -26,12 +23,9 @@ class AnalyticsPermission(permissions.BasePermission):
     message = "You do not have the required analytics permission."
 
     def has_permission(self, request, view):
-        if not self.permission_codename:
-            return False
-
-        return has_analytics_permission(
-            request.user,
-            self.permission_codename,
+        return bool(
+            self.permission_codename
+            and has_analytics_permission(request.user, self.permission_codename)
         )
 
 
@@ -51,7 +45,22 @@ class CanManageAnalyticsSchedules(AnalyticsPermission):
     permission_codename = MANAGE_ANALYTICS_SCHEDULES
 
 
-# Backward-compatible name for older imports.
-# The check is now RBAC-based instead of Django is_staff.
+class CanViewSellerAnalytics(AnalyticsPermission):
+    permission_codename = VIEW_SELLER_ANALYTICS
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not super().has_permission(request, view):
+            return False
+        if not user.is_seller:
+            return False
+        return Seller.objects.filter(
+            user_id=user.pk,
+            status=Seller.StatusChoices.APPROVED,
+        ).exists()
+
+
 class IsAnalyticsAdmin(CanViewPlatformAnalytics):
+    """Legacy import alias; not based on is_staff."""
+
     pass

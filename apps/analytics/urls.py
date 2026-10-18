@@ -1,8 +1,11 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from apps.analytics.financial_views import (
-    FinancialAnalyticsView,
+from apps.analytics.financial_views import FinancialAnalyticsView
+from apps.analytics.seller_views import (
+    SellerDashboardView,
+    SellerProductsView,
+    SellerTimeSeriesView,
 )
 from apps.analytics.views import (
     AnalyticsAlertsView,
@@ -16,57 +19,43 @@ from apps.analytics.views import (
 )
 
 urlpatterns = [
+    path("dashboard/", DashboardAnalyticsView.as_view(), name="analytics-dashboard"),
+    path("timeseries/", AnalyticsTimeSeriesView.as_view(), name="analytics-timeseries"),
+    path("breakdown/", AnalyticsBreakdownView.as_view(), name="analytics-breakdown"),
+    path("alerts/", AnalyticsAlertsView.as_view(), name="analytics-alerts"),
+    path("export/", AnalyticsExportView.as_view(), name="analytics-export"),
+    path("financial/", FinancialAnalyticsView.as_view(), name="analytics-financial"),
     path(
-        "dashboard/",
-        DashboardAnalyticsView.as_view(),
-        name="analytics-dashboard",
+        "seller/dashboard/",
+        SellerDashboardView.as_view(),
+        name="analytics-seller-dashboard",
     ),
     path(
-        "timeseries/",
-        AnalyticsTimeSeriesView.as_view(),
-        name="analytics-timeseries",
+        "seller/timeseries/",
+        SellerTimeSeriesView.as_view(),
+        name="analytics-seller-timeseries",
     ),
     path(
-        "breakdown/",
-        AnalyticsBreakdownView.as_view(),
-        name="analytics-breakdown",
-    ),
-    path(
-        "alerts/",
-        AnalyticsAlertsView.as_view(),
-        name="analytics-alerts",
-    ),
-    path(
-        "export/",
-        AnalyticsExportView.as_view(),
-        name="analytics-export",
-    ),
-    path(
-        "financial/",
-        FinancialAnalyticsView.as_view(),
-        name="analytics-financial",
+        "seller/products/",
+        SellerProductsView.as_view(),
+        name="analytics-seller-products",
     ),
 ]
 
-
 router = DefaultRouter()
-
 router.register(
     "report-schedules",
     AnalyticsReportScheduleViewSet,
     basename="analytics-report-schedule",
 )
-
 router.register(
     "generated-reports",
     AnalyticsGeneratedReportViewSet,
     basename="analytics-generated-report",
 )
-
 router.register(
     "generate-report-now",
     GenerateAnalyticsReportNowView,
     basename="analytics-generate-report-now",
 )
-
 urlpatterns += router.urls
