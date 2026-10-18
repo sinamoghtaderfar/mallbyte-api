@@ -6,12 +6,13 @@ User = get_user_model()
 
 
 class Role(models.Model):
-    """
-    Role model for RBAC - defines different user roles in the system
-    """
+    """A named collection of business permissions."""
 
     name = models.CharField(max_length=255, unique=True)
-    description = models.TextField(blank=True, verbose_name="Description")
+    description = models.TextField(
+        blank=True,
+        verbose_name="Description",
+    )
     level = models.IntegerField(
         default=0,
         verbose_name="Role Level",
@@ -35,9 +36,7 @@ class Role(models.Model):
 
 
 class Permission(models.Model):
-    """
-    Permission model - specific actions users can perform
-    """
+    """A business action that can be granted to roles."""
 
     name = models.CharField(
         max_length=255,
@@ -62,6 +61,7 @@ class Permission(models.Model):
             ("shipping", "Shipping"),
             ("content", "Content"),
             ("support", "Support"),
+            ("analytics", "Analytics"),
             ("rbac", "RBAC"),
         ],
     )
@@ -81,9 +81,7 @@ class Permission(models.Model):
 
 
 class RolePermission(models.Model):
-    """
-    Junction table linking roles to permissions
-    """
+    """Link between a role and a permission."""
 
     role = models.ForeignKey(
         Role,
@@ -107,9 +105,7 @@ class RolePermission(models.Model):
 
 
 class UserRole(models.Model):
-    """
-    Junction table linking users to roles with assignment tracking
-    """
+    """Role assignment with activation and expiration."""
 
     user = models.ForeignKey(
         User,
@@ -150,13 +146,8 @@ class UserRole(models.Model):
 
     @property
     def is_expired(self):
-        """
-        Check if role assignment has expired.
-        """
-
         if self.expires_at:
             return timezone.now() > self.expires_at
-
         return False
 
 

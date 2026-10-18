@@ -57,12 +57,9 @@ class IsVendorManager(permissions.BasePermission):
     """Check if user has vendor manager role."""
 
     def has_permission(self, request, view):
-        return (
-            request.user.is_authenticated
-            and (
-                request.user.is_superuser
-                or user_has_active_role(request.user, "vendor_manager")
-            )
+        return request.user.is_authenticated and (
+            request.user.is_superuser
+            or user_has_active_role(request.user, "vendor_manager")
         )
 
 
@@ -70,12 +67,9 @@ class IsContentAdmin(permissions.BasePermission):
     """Check if user has content admin role."""
 
     def has_permission(self, request, view):
-        return (
-            request.user.is_authenticated
-            and (
-                request.user.is_superuser
-                or user_has_active_role(request.user, "content_admin")
-            )
+        return request.user.is_authenticated and (
+            request.user.is_superuser
+            or user_has_active_role(request.user, "content_admin")
         )
 
 
@@ -83,12 +77,9 @@ class IsProductAdmin(permissions.BasePermission):
     """Check if user has product admin role."""
 
     def has_permission(self, request, view):
-        return (
-            request.user.is_authenticated
-            and (
-                request.user.is_superuser
-                or user_has_active_role(request.user, "product_admin")
-            )
+        return request.user.is_authenticated and (
+            request.user.is_superuser
+            or user_has_active_role(request.user, "product_admin")
         )
 
 
