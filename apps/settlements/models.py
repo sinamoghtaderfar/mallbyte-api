@@ -156,3 +156,5 @@ class ConfirmedPayout(models.Model):
                 condition=Q(amount__gt=0), name="positive_confirmed_payout"
             )
         ]
+
+from .monitoring_models import FinancialAuditRun, FinancialAuditAlert  # noqa: E402,F401
