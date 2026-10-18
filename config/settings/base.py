@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "apps.analytics",
     "django_celery_beat",
     "apps.observability",
+    "apps.settlements",
 ]
 
 MIDDLEWARE = [

@@ -4,14 +4,12 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from apps.accounts.views import ThrottledTokenObtainPairView, CookieTokenRefreshView
+from apps.accounts.views import CookieTokenRefreshView, ThrottledTokenObtainPairView
 from config.views import api_home
 
 urlpatterns = [
     path("", api_home, name="api_home"),
-    
     path("admin/", admin.site.urls),
-
     path(
         "api/auth/token/",
         ThrottledTokenObtainPairView.as_view(),
@@ -22,7 +20,6 @@ urlpatterns = [
         CookieTokenRefreshView.as_view(),
         name="token_refresh",
     ),
-
     path("api/auth/", include("apps.accounts.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
@@ -44,6 +41,7 @@ urlpatterns = [
     path("api/content/", include("apps.content.urls")),
     path("api/analytics/", include("apps.analytics.urls")),
     path("api/observability/", include("apps.observability.urls")),
+    path("api/settlements/", include("apps.settlements.urls")),
 ]
 
 
