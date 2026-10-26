@@ -267,7 +267,7 @@ def get_financial_cashflow(
             "capture_date_field": "paid_at",
             "refund_date_field": "refunded_at",
             "full_refunds_supported": True,
-            "partial_refunds_supported": False,
+            "partial_refunds_supported": bool(getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False)),
             "platform_profit_calculated": False,
             "tax_and_fee_adjustments_included": False,
         },

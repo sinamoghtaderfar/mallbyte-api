@@ -242,19 +242,19 @@ class FinancialMonitoringDemoTests(APITestCase):
             self.client.get(reverse("settlement-monitoring-runs")).status_code, 403
         )
         self.client.force_authenticate(user=self.manager)
-        response = self.client.post(
-            reverse("settlement-monitoring-run-now"), {}, format="json"
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(
-            self.client.get(
-                reverse(
-                    "settlement-monitoring-run-detail",
-                    args=[response.data["id"]],
-                )
-            ).status_code,
-            200,
-        )
+        with patch(
+            "apps.settlements.monitoring_views.run_manual_financial_audit.delay"
+        ) as mocked:
+            mocked.return_value.id = "test-task-123"
+            response = self.client.post(
+                reverse("settlement-monitoring-run-now"),
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertTrue(response.data["queued"])
+        self.assertEqual(response.data["task_id"], "test-task-123")
 
     def test_demo_capture_and_replay_post_once(self):
         order, payment = self._checkout_and_attempt()
