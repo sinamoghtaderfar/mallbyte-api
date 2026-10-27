@@ -92,11 +92,13 @@ class RBACTestMixin:
             module="products",
             description="Can manage products",
         )
-        self.content_permission = Permission.objects.create(
-            name="Manage Content",
+        self.content_permission, _ = Permission.objects.get_or_create(
             codename="manage_content",
-            module="content",
-            description="Can manage content",
+            defaults={
+                "name": "Manage Content",
+                "module": "content",
+                "description": "Can manage content",
+            },
         )
 
     def create_user(
