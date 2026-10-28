@@ -5,7 +5,7 @@ PERMISSION_CACHE_TIMEOUT = 3600
 
 
 def get_permissions_cache_key(user):
-    return f"user_permissions_v2_{user.id}"
+    return f"user_permissions_v3_{user.id}"
 
 
 def get_user_roles(user):

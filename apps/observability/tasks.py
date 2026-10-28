@@ -27,3 +27,6 @@ def cleanup_observability_logs(days=None, audit_days=None):
         days=int(days if days is not None else getattr(settings, "OBSERVABILITY_LOG_RETENTION_DAYS", 30)),
         audit_days=int(audit_days if audit_days is not None else getattr(settings, "OBSERVABILITY_AUDIT_RETENTION_DAYS", 365)),
     )
+
+# Asynchronous provider diagnosis (registered under the conventional tasks module).
+from apps.observability.workflow_tasks import run_observability_ai_diagnosis  # noqa: E402,F401

@@ -18,6 +18,9 @@ from apps.observability.models import (
     RequestLog,
     SystemHealthSnapshot,
 )
+from apps.observability.workflow_permissions import (
+    SensitiveLogFieldsMixin, ViewAuditLogs,
+)
 from apps.observability.permissions import (
     IsObservabilityAdmin, IsObservabilityLogsReader,
     IsObservabilityAlertManager, IsObservabilityErrorManager,
@@ -57,7 +60,7 @@ class ObservabilityStatsView(APIView):
         return Response(build_metrics(request.query_params.get("window", "24h")))
 
 
-class RequestLogViewSet(viewsets.ReadOnlyModelViewSet):
+class RequestLogViewSet(SensitiveLogFieldsMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = RequestLogSerializer
     permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 
@@ -90,7 +93,7 @@ class RequestLogViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset
 
 
-class ErrorLogViewSet(viewsets.ReadOnlyModelViewSet):
+class ErrorLogViewSet(SensitiveLogFieldsMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = ErrorLogSerializer
     permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 
@@ -140,7 +143,7 @@ class ErrorLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
+    permission_classes = [IsAuthenticated, ViewAuditLogs]
 
     def get_queryset(self):
         queryset = AuditLog.objects.select_related("actor").order_by(
@@ -246,7 +249,7 @@ class ObservabilityAlertViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(serializer.data)
 
 
-class CeleryTaskLogViewSet(viewsets.ReadOnlyModelViewSet):
+class CeleryTaskLogViewSet(SensitiveLogFieldsMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = CeleryTaskLogSerializer
     permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 

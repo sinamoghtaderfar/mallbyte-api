@@ -1,6 +1,8 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
+from apps.observability.workflow_views import IncidentViewSet, InfrastructureOperationViewSet
+
 from apps.observability.views import (
     AuditLogViewSet,
     CeleryTaskLogViewSet,
@@ -44,6 +46,8 @@ router.register(
     basename="observability-celery-task-log",
 )
 
+router.register("incidents", IncidentViewSet, basename="observability-incident")
+router.register("operations", InfrastructureOperationViewSet, basename="observability-operation")
 
 urlpatterns = [
     path("health/", ObservabilityHealthView.as_view(), name="observability-health"),

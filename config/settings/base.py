@@ -343,3 +343,16 @@ AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
 
 # Required for the Next.js frontend to send refresh cookies
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
+
+# Incident workflows: AI enabled automatically with an explicitly configured key.
+# OBSERVABILITY_AI_ENABLED=false acts as a global emergency kill switch.
+OBSERVABILITY_AI_API_KEY = os.getenv("OBSERVABILITY_AI_API_KEY", "")
+OBSERVABILITY_AI_ENABLED = os.getenv("OBSERVABILITY_AI_ENABLED", "auto")
+OBSERVABILITY_AI_MODEL = os.getenv("OBSERVABILITY_AI_MODEL", "gpt-5-mini")
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["observability_ai"] = os.getenv("OBSERVABILITY_AI_RATE", "10/day")
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["observability_ops"] = os.getenv("OBSERVABILITY_OPS_RATE", "10/hour")
+# These targets are requestable. Host runner additionally refuses Redis by design.
+OBSERVABILITY_OPS_ALLOWED_TARGETS = [
+    x.strip() for x in os.getenv("OBSERVABILITY_OPS_ALLOWED_TARGETS", "celery_worker,celery_beat").split(",")
+    if x.strip() in ("celery_worker", "celery_beat", "redis")
+]
