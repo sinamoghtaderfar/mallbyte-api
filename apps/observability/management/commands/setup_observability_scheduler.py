@@ -1,37 +1,36 @@
+"""Idempotent Celery Beat health and cleanup scheduling."""
+import json
 from django.core.management.base import BaseCommand
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 
 class Command(BaseCommand):
-    help = "Create or update periodic Celery Beat tasks for observability."
+    help = "Configure periodic health collection and safe retention cleanup."
 
     def handle(self, *args, **options):
-        interval, _created = IntervalSchedule.objects.get_or_create(
-            every=5,
-            period=IntervalSchedule.MINUTES,
+        health_interval, _ = IntervalSchedule.objects.get_or_create(
+            every=5, period=IntervalSchedule.MINUTES,
         )
-
-        task, created = PeriodicTask.objects.update_or_create(
+        health, _ = PeriodicTask.objects.update_or_create(
             name="Collect observability health snapshot",
             defaults={
-                "interval": interval,
+                "interval": health_interval,
                 "task": "apps.observability.tasks.collect_observability_health_snapshot",
-                "enabled": True,
+                "args": "[]", "enabled": True,
             },
         )
-
-        if created:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    "Observability health snapshot task created successfully."
-                )
-            )
-        else:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    "Observability health snapshot task updated successfully."
-                )
-            )
-
-        self.stdout.write(f"Task: {task.task}")
+        cleanup_interval, _ = IntervalSchedule.objects.get_or_create(
+            every=24, period=IntervalSchedule.HOURS,
+        )
+        cleanup, _ = PeriodicTask.objects.update_or_create(
+            name="Clean up observability logs",
+            defaults={
+                "interval": cleanup_interval,
+                "task": "apps.observability.tasks.cleanup_observability_logs",
+                "args": json.dumps([]), "enabled": True,
+            },
+        )
+        self.stdout.write(self.style.SUCCESS("Observability schedules configured."))
+        self.stdout.write(f"Task: {health.task}")
         self.stdout.write("Interval: every 5 minutes")
+        self.stdout.write(f"Task: {cleanup.task} (every 24 hours)")

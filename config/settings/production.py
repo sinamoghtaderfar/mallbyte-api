@@ -59,3 +59,8 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
         ),
     }
 )
+
+# Minimize disclosure from exception and worker result representations.
+OBSERVABILITY_STORE_TRACEBACK = False
+OBSERVABILITY_STORE_EXCEPTION_MESSAGES = False
+OBSERVABILITY_STORE_TASK_RESULTS = False

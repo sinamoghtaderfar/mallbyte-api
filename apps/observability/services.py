@@ -1,5 +1,7 @@
 import hashlib
+import ipaddress
 import os
+from django.db import IntegrityError, transaction
 import platform
 import socket
 import time
@@ -14,6 +16,8 @@ from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 from django_celery_beat.models import PeriodicTask
+
+from apps.observability.sanitization import scrub_query, scrub_text
 
 from apps.observability.models import (
     AuditLog,
@@ -34,12 +38,17 @@ def decimal_value(value):
 
 
 def get_client_ip(request):
-    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    return request.META.get("REMOTE_ADDR")
+    """Only trust forwarding headers when a known reverse proxy sent them."""
+    peer = request.META.get("REMOTE_ADDR", "")
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    trusted = getattr(settings, "OBSERVABILITY_TRUSTED_PROXIES", [])
+    if (getattr(settings, "OBSERVABILITY_TRUST_PROXY_HEADERS", False)
+            and peer in trusted and forwarded):
+        peer = forwarded.split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(peer))
+    except ValueError:
+        return None
 
 
 def should_skip_observability_path(path):
@@ -87,11 +96,11 @@ def create_request_log(
         request_id=request_id,
         method=request.method,
         path=path,
-        query_string=request.META.get("QUERY_STRING", ""),
+        query_string=scrub_query(request.META.get("QUERY_STRING", "")),
         status_code=getattr(response, "status_code", 0),
         duration_ms=duration_ms,
         ip_address=get_client_ip(request),
-        user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        user_agent=scrub_text(request.META.get("HTTP_USER_AGENT", ""), limit=500),
         response_size_bytes=response_size,
         metadata={
             "view": getattr(request, "resolver_match", None).view_name
@@ -118,8 +127,13 @@ def create_error_log_from_exception(
         user = None
 
     exception_type = exception.__class__.__name__
-    message = str(exception)
-    traceback_text = traceback_module.format_exc()
+    message = (scrub_text(exception, limit=2000) if getattr(
+        settings, "OBSERVABILITY_STORE_EXCEPTION_MESSAGES", True
+    ) else f"Unhandled {exception.__class__.__name__}")
+    traceback_text = (
+        scrub_text(traceback_module.format_exc(), limit=10000)
+        if getattr(settings, "OBSERVABILITY_STORE_TRACEBACK", False) else ""
+    )
 
     fingerprint = build_error_fingerprint(
         exception_type=exception_type,
@@ -133,12 +147,12 @@ def create_error_log_from_exception(
         severity=SeverityChoices.ERROR,
         exception_type=exception_type,
         message=message,
-        traceback=traceback_text[-10000:],
+        traceback=traceback_text,
         method=getattr(request, "method", ""),
         path=path,
         status_code=500,
         ip_address=get_client_ip(request),
-        user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        user_agent=scrub_text(request.META.get("HTTP_USER_AGENT", ""), limit=500),
         fingerprint=fingerprint,
         metadata={
             "request_id": getattr(request, "observability_request_id", ""),
@@ -149,7 +163,7 @@ def create_error_log_from_exception(
         alert_type=ObservabilityAlert.AlertTypeChoices.ERROR_SPIKE,
         severity=SeverityChoices.ERROR,
         title=f"Unhandled exception: {exception_type}",
-        message=f"{message} on {path}",
+        message=f"{exception_type} on {path}",
         source="django",
         fingerprint=f"error:{fingerprint}",
         related_object_type="ErrorLog",
@@ -179,7 +193,7 @@ def create_audit_log(
 
     if request:
         ip_address = get_client_ip(request)
-        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        user_agent = scrub_text(request.META.get("HTTP_USER_AGENT", ""), limit=500)
 
     return AuditLog.objects.create(
         actor=actor,
@@ -217,7 +231,7 @@ def check_database_health():
         return {
             "status": HealthStatusChoices.UNHEALTHY,
             "latency_ms": latency_ms,
-            "error": str(exc),
+            "error": scrub_text(exc, limit=300) if settings.DEBUG else "Health check failed",
         }
 
 
@@ -246,7 +260,7 @@ def check_redis_health():
         return {
             "status": HealthStatusChoices.UNHEALTHY,
             "latency_ms": latency_ms,
-            "error": str(exc),
+            "error": scrub_text(exc, limit=300) if settings.DEBUG else "Health check failed",
         }
 
 
@@ -272,7 +286,7 @@ def check_celery_worker_health():
         return {
             "status": HealthStatusChoices.UNHEALTHY,
             "workers": {},
-            "error": str(exc),
+            "error": scrub_text(exc, limit=300) if settings.DEBUG else "Health check failed",
         }
 
 
@@ -317,7 +331,7 @@ def check_celery_beat_health():
         return {
             "status": HealthStatusChoices.UNKNOWN,
             "last_run_at": None,
-            "error": str(exc),
+            "error": scrub_text(exc, limit=300) if settings.DEBUG else "Health check failed",
         }
 
 
@@ -358,6 +372,7 @@ def calculate_overall_health_status(
     cpu_percent,
     memory_percent,
     disk_percent,
+    celery_beat_status=None,
 ):
     unhealthy_statuses = {
         HealthStatusChoices.UNHEALTHY,
@@ -379,6 +394,12 @@ def calculate_overall_health_status(
     disk_warning = Decimal(
         str(getattr(settings, "OBSERVABILITY_DISK_WARNING_PERCENT", 85))
     )
+
+    if celery_beat_status == HealthStatusChoices.UNHEALTHY:
+        return HealthStatusChoices.UNHEALTHY
+
+    if celery_beat_status == HealthStatusChoices.UNKNOWN:
+        return HealthStatusChoices.DEGRADED
 
     if (
         cpu_percent is not None
@@ -412,6 +433,7 @@ def collect_system_health_snapshot():
         database_status=database_health["status"],
         redis_status=redis_health["status"],
         celery_status=celery_health["status"],
+        celery_beat_status=celery_beat_health["status"],
         cpu_percent=system_metrics["cpu_percent"],
         memory_percent=system_metrics["memory_percent"],
         disk_percent=system_metrics["disk_percent"],
@@ -467,8 +489,9 @@ def create_or_update_alert(
 ):
     alert = ObservabilityAlert.objects.filter(
         fingerprint=fingerprint,
-        status=ObservabilityAlert.StatusChoices.OPEN,
-    ).first()
+        status__in=[ObservabilityAlert.StatusChoices.OPEN,
+                    ObservabilityAlert.StatusChoices.ACKNOWLEDGED],
+    ).order_by("created_at").first()
 
     if alert:
         alert.severity = severity
@@ -492,18 +515,37 @@ def create_or_update_alert(
         )
         return alert
 
-    return ObservabilityAlert.objects.create(
-        alert_type=alert_type,
-        severity=severity,
-        status=ObservabilityAlert.StatusChoices.OPEN,
-        title=title,
-        message=message,
-        source=source,
+    try:
+        with transaction.atomic():
+            return ObservabilityAlert.objects.create(
+                alert_type=alert_type, severity=severity,
+                status=ObservabilityAlert.StatusChoices.OPEN,
+                title=title, message=message, source=source,
+                fingerprint=fingerprint,
+                related_object_type=related_object_type,
+                related_object_id=related_object_id, metadata=metadata or {},
+            )
+    except IntegrityError:
+        if fingerprint:
+            existing = ObservabilityAlert.objects.filter(
+                fingerprint=fingerprint,
+                status__in=[ObservabilityAlert.StatusChoices.OPEN,
+                            ObservabilityAlert.StatusChoices.ACKNOWLEDGED],
+            ).first()
+            if existing:
+                return existing
+        raise
+
+
+def recover_alert(fingerprint):
+    """Close recovered health alerts, including previously acknowledged ones."""
+    now = timezone.now()
+    ObservabilityAlert.objects.filter(
         fingerprint=fingerprint,
-        related_object_type=related_object_type,
-        related_object_id=related_object_id,
-        metadata=metadata or {},
-    )
+        status__in=[ObservabilityAlert.StatusChoices.OPEN,
+                    ObservabilityAlert.StatusChoices.ACKNOWLEDGED],
+    ).update(status=ObservabilityAlert.StatusChoices.RESOLVED,
+             resolved_at=now, resolved_by=None, updated_at=now)
 
 
 def evaluate_observability_alert_rules(snapshot):
@@ -529,6 +571,8 @@ def evaluate_observability_alert_rules(snapshot):
             related_object_id=str(snapshot.id),
             metadata={"cpu_percent": str(snapshot.cpu_percent)},
         )
+    else:
+        recover_alert("linux:cpu:high")
 
     if (
         snapshot.memory_percent is not None
@@ -545,6 +589,8 @@ def evaluate_observability_alert_rules(snapshot):
             related_object_id=str(snapshot.id),
             metadata={"memory_percent": str(snapshot.memory_percent)},
         )
+    else:
+        recover_alert("linux:memory:high")
 
     if snapshot.disk_percent is not None and snapshot.disk_percent >= disk_warning:
         create_or_update_alert(
@@ -558,6 +604,8 @@ def evaluate_observability_alert_rules(snapshot):
             related_object_id=str(snapshot.id),
             metadata={"disk_percent": str(snapshot.disk_percent)},
         )
+    else:
+        recover_alert("linux:disk:high")
 
     service_checks = [
         (
@@ -603,6 +651,8 @@ def evaluate_observability_alert_rules(snapshot):
                 related_object_id=str(snapshot.id),
                 metadata={"snapshot_id": str(snapshot.id)},
             )
+        elif service_status == HealthStatusChoices.HEALTHY:
+            recover_alert(fingerprint)
 
     evaluate_error_spike_alert()
     evaluate_slow_request_alert()
@@ -640,6 +690,8 @@ def evaluate_error_spike_alert():
                 "window_minutes": window_minutes,
             },
         )
+    else:
+        recover_alert("django:error-spike")
 
 
 def evaluate_slow_request_alert():
@@ -669,10 +721,15 @@ def evaluate_slow_request_alert():
                 "threshold_ms": threshold_ms,
             },
         )
+    else:
+        recover_alert("django:slow-requests")
 
 
-def cleanup_old_observability_logs(days=30):
+def cleanup_old_observability_logs(days=30, audit_days=None):
+    if days < 1 or (audit_days is not None and audit_days < 1):
+        raise ValueError("Retention days must be positive")
     cutoff = timezone.now() - timedelta(days=days)
+    audit_cutoff = timezone.now() - timedelta(days=(audit_days or days))
 
     deleted_request_logs, _ = RequestLog.objects.filter(
         created_at__lt=cutoff,
@@ -688,7 +745,7 @@ def cleanup_old_observability_logs(days=30):
     ).delete()
 
     deleted_audit_logs, _ = AuditLog.objects.filter(
-        created_at__lt=cutoff,
+        created_at__lt=audit_cutoff,
     ).delete()
 
     return {

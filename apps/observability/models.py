@@ -430,6 +430,13 @@ class ObservabilityAlert(models.Model):
             models.Index(fields=["alert_type", "-created_at"]),
             models.Index(fields=["fingerprint", "status"]),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["fingerprint"],
+                condition=models.Q(status__in=["open", "acknowledged"]) & ~models.Q(fingerprint=""),
+                name="obs_one_live_fingerprint",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.severity} - {self.title}"

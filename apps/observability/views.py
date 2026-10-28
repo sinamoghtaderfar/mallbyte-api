@@ -2,10 +2,12 @@ from datetime import timedelta
 
 from django.db.models import Avg, Count
 from django.utils import timezone
+from django.conf import settings
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import status
 from rest_framework.views import APIView
 
 from apps.observability.models import (
@@ -16,7 +18,11 @@ from apps.observability.models import (
     RequestLog,
     SystemHealthSnapshot,
 )
-from apps.observability.permissions import IsObservabilityAdmin
+from apps.observability.permissions import (
+    IsObservabilityAdmin, IsObservabilityLogsReader,
+    IsObservabilityAlertManager, IsObservabilityErrorManager,
+)
+from apps.observability.metrics import build_metrics
 from apps.observability.serializers import (
     AuditLogSerializer,
     CeleryTaskLogSerializer,
@@ -25,73 +31,35 @@ from apps.observability.serializers import (
     RequestLogSerializer,
     SystemHealthSnapshotSerializer,
 )
-from apps.observability.services import collect_system_health_snapshot
+from apps.observability.services import create_audit_log
 
 
 class ObservabilityHealthView(APIView):
     permission_classes = [IsAuthenticated, IsObservabilityAdmin]
 
     def get(self, request):
-        snapshot = collect_system_health_snapshot()
-
-        serializer = SystemHealthSnapshotSerializer(snapshot)
-
-        return Response(serializer.data)
+        # Read-only: periodic Celery Beat collection must own snapshot writes.
+        snapshot = SystemHealthSnapshot.objects.order_by("-created_at").first()
+        if snapshot is None:
+            return Response({"status": "unknown", "detail": "No health snapshot yet. Run the scheduled collector."},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        data = SystemHealthSnapshotSerializer(snapshot).data
+        threshold = getattr(settings, "OBSERVABILITY_SNAPSHOT_STALE_SECONDS", 900)
+        data["is_stale"] = (timezone.now() - snapshot.created_at).total_seconds() > threshold
+        data["stale_after_seconds"] = threshold
+        return Response(data)
 
 
 class ObservabilityStatsView(APIView):
     permission_classes = [IsAuthenticated, IsObservabilityAdmin]
 
     def get(self, request):
-        now = timezone.now()
-        last_24_hours = now - timedelta(hours=24)
-
-        request_logs = RequestLog.objects.filter(
-            created_at__gte=last_24_hours,
-        )
-
-        error_logs = ErrorLog.objects.filter(
-            created_at__gte=last_24_hours,
-        )
-
-        open_alerts = ObservabilityAlert.objects.filter(
-            status=ObservabilityAlert.StatusChoices.OPEN,
-        )
-
-        return Response(
-            {
-                "window": "last_24_hours",
-                "requests_count": request_logs.count(),
-                "error_logs_count": error_logs.count(),
-                "open_alerts_count": open_alerts.count(),
-                "slow_requests_count": request_logs.filter(
-                    duration_ms__gte=1000,
-                ).count(),
-                "average_duration_ms": request_logs.aggregate(
-                    average=Avg("duration_ms"),
-                )["average"] or 0,
-                "status_codes": list(
-                    request_logs.values("status_code")
-                    .annotate(count=Count("id"))
-                    .order_by("status_code")
-                ),
-                "top_paths": list(
-                    request_logs.values("path")
-                    .annotate(count=Count("id"))
-                    .order_by("-count")[:10]
-                ),
-                "open_alerts_by_severity": list(
-                    open_alerts.values("severity")
-                    .annotate(count=Count("id"))
-                    .order_by("severity")
-                ),
-            }
-        )
+        return Response(build_metrics(request.query_params.get("window", "24h")))
 
 
 class RequestLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = RequestLogSerializer
-    permission_classes = [IsAuthenticated, IsObservabilityAdmin]
+    permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 
     def get_queryset(self):
         queryset = RequestLog.objects.select_related("user").order_by(
@@ -124,7 +92,7 @@ class RequestLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ErrorLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ErrorLogSerializer
-    permission_classes = [IsAuthenticated, IsObservabilityAdmin]
+    permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 
     def get_queryset(self):
         queryset = ErrorLog.objects.select_related(
@@ -156,10 +124,14 @@ class ErrorLogViewSet(viewsets.ReadOnlyModelViewSet):
         detail=True,
         methods=["post"],
         url_path="resolve",
+        permission_classes=[IsAuthenticated, IsObservabilityErrorManager],
     )
     def resolve(self, request, pk=None):
         error_log = self.get_object()
         error_log.mark_resolved(user=request.user)
+        create_audit_log(actor=request.user, action=AuditLog.ActionChoices.UPDATE,
+                         description="Resolved observability error", object_type="ErrorLog",
+                         object_id=str(error_log.id), request=request)
 
         serializer = self.get_serializer(error_log)
 
@@ -168,7 +140,7 @@ class ErrorLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAuthenticated, IsObservabilityAdmin]
+    permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 
     def get_queryset(self):
         queryset = AuditLog.objects.select_related("actor").order_by(
@@ -239,10 +211,16 @@ class ObservabilityAlertViewSet(viewsets.ReadOnlyModelViewSet):
         detail=True,
         methods=["post"],
         url_path="acknowledge",
+        permission_classes=[IsAuthenticated, IsObservabilityAlertManager],
     )
     def acknowledge(self, request, pk=None):
         alert = self.get_object()
+        if alert.status != ObservabilityAlert.StatusChoices.OPEN:
+            return Response({"detail": "Only open alerts can be acknowledged."}, status=409)
         alert.acknowledge(user=request.user)
+        create_audit_log(actor=request.user, action=AuditLog.ActionChoices.UPDATE,
+                         description="Acknowledged observability alert",
+                         object_type="ObservabilityAlert", object_id=str(alert.id), request=request)
 
         serializer = self.get_serializer(alert)
 
@@ -252,10 +230,16 @@ class ObservabilityAlertViewSet(viewsets.ReadOnlyModelViewSet):
         detail=True,
         methods=["post"],
         url_path="resolve",
+        permission_classes=[IsAuthenticated, IsObservabilityAlertManager],
     )
     def resolve(self, request, pk=None):
         alert = self.get_object()
+        if alert.status == ObservabilityAlert.StatusChoices.RESOLVED:
+            return Response({"detail": "Alert is already resolved."}, status=409)
         alert.resolve(user=request.user)
+        create_audit_log(actor=request.user, action=AuditLog.ActionChoices.UPDATE,
+                         description="Resolved observability alert",
+                         object_type="ObservabilityAlert", object_id=str(alert.id), request=request)
 
         serializer = self.get_serializer(alert)
 
@@ -264,7 +248,7 @@ class ObservabilityAlertViewSet(viewsets.ReadOnlyModelViewSet):
 
 class CeleryTaskLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CeleryTaskLogSerializer
-    permission_classes = [IsAuthenticated, IsObservabilityAdmin]
+    permission_classes = [IsAuthenticated, IsObservabilityLogsReader]
 
     def get_queryset(self):
         queryset = CeleryTaskLog.objects.order_by("-created_at")

@@ -62,6 +62,7 @@ class Permission(models.Model):
             ("content", "Content"),
             ("support", "Support"),
             ("analytics", "Analytics"),
+            ("observability", "Observability"),
             ("rbac", "RBAC"),
         ],
     )

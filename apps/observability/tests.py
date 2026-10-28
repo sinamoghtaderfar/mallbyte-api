@@ -155,18 +155,20 @@ class ObservabilityAPITestCase(ObservabilityTestMixin, APITestCase):
 
         url = reverse("observability-health")
 
-        with patch(
-            "apps.observability.views.collect_system_health_snapshot",
-            return_value=snapshot,
-        ):
-            response = self.client.get(url)
+        response = self.client.get(url)
+
+        self.assertEqual(response.data["id"], str(snapshot.id))
+        self.assertEqual(SystemHealthSnapshot.objects.count(), 1)
+        self.assertFalse(response.data["is_stale"])
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], HealthStatusChoices.HEALTHY)
         self.assertEqual(response.data["database_status"], HealthStatusChoices.HEALTHY)
         self.assertEqual(response.data["redis_status"], HealthStatusChoices.HEALTHY)
         self.assertEqual(response.data["celery_status"], HealthStatusChoices.HEALTHY)
-        self.assertEqual(response.data["celery_beat_status"], HealthStatusChoices.HEALTHY)
+        self.assertEqual(
+            response.data["celery_beat_status"], HealthStatusChoices.HEALTHY
+        )
 
     def test_admin_can_access_stats_endpoint(self):
         self.authenticate_admin()
@@ -249,25 +251,19 @@ class ObservabilityAPITestCase(ObservabilityTestMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data.get("results", response.data)
-        self.assertTrue(
-            any(item["method"] == "POST" for item in results)
-        )
+        self.assertTrue(any(item["method"] == "POST" for item in results))
 
         response = self.client.get(url, {"slow": "true"})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data.get("results", response.data)
-        self.assertTrue(
-            all(item["duration_ms"] >= 1000 for item in results)
-        )
+        self.assertTrue(all(item["duration_ms"] >= 1000 for item in results))
 
         response = self.client.get(url, {"error": "true"})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data.get("results", response.data)
-        self.assertTrue(
-            all(item["status_code"] >= 500 for item in results)
-        )
+        self.assertTrue(all(item["status_code"] >= 500 for item in results))
 
     def test_error_logs_list_filter_and_resolve(self):
         self.authenticate_admin()
@@ -463,7 +459,10 @@ class ObservabilityAPITestCase(ObservabilityTestMixin, APITestCase):
         results = response.data.get("results", response.data)
 
         self.assertTrue(
-            all(item["status"] == CeleryTaskLog.StatusChoices.SUCCESS for item in results)
+            all(
+                item["status"] == CeleryTaskLog.StatusChoices.SUCCESS
+                for item in results
+            )
         )
 
     def test_customer_cannot_access_request_logs(self):
@@ -481,6 +480,10 @@ class ObservabilityServicesTestCase(ObservabilityTestMixin, APITestCase):
         self.factory = RequestFactory()
         self.admin = self.create_admin_user()
 
+    @override_settings(
+        OBSERVABILITY_TRUST_PROXY_HEADERS=True,
+        OBSERVABILITY_TRUSTED_PROXIES=["127.0.0.1"],
+    )
     def test_get_client_ip_uses_forwarded_for(self):
         request = self.factory.get(
             "/api/test/",
@@ -600,7 +603,9 @@ class ObservabilityServicesTestCase(ObservabilityTestMixin, APITestCase):
             related_object_id=str(error_log.id),
         )
 
-        self.assertEqual(alert.alert_type, ObservabilityAlert.AlertTypeChoices.ERROR_SPIKE)
+        self.assertEqual(
+            alert.alert_type, ObservabilityAlert.AlertTypeChoices.ERROR_SPIKE
+        )
         self.assertEqual(alert.severity, SeverityChoices.ERROR)
         self.assertEqual(alert.source, "django")
 
@@ -820,7 +825,9 @@ class ObservabilityServicesTestCase(ObservabilityTestMixin, APITestCase):
         )
 
         self.assertEqual(alert.severity, SeverityChoices.CRITICAL)
-        self.assertEqual(alert.alert_type, ObservabilityAlert.AlertTypeChoices.ERROR_SPIKE)
+        self.assertEqual(
+            alert.alert_type, ObservabilityAlert.AlertTypeChoices.ERROR_SPIKE
+        )
 
     @override_settings(
         OBSERVABILITY_SLOW_REQUEST_THRESHOLD_MS=1000,
@@ -843,7 +850,9 @@ class ObservabilityServicesTestCase(ObservabilityTestMixin, APITestCase):
         )
 
         self.assertEqual(alert.severity, SeverityChoices.WARNING)
-        self.assertEqual(alert.alert_type, ObservabilityAlert.AlertTypeChoices.SLOW_REQUEST)
+        self.assertEqual(
+            alert.alert_type, ObservabilityAlert.AlertTypeChoices.SLOW_REQUEST
+        )
 
     def test_cleanup_old_observability_logs(self):
         old_date = timezone.now() - timedelta(days=40)

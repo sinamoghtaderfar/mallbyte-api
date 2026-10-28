@@ -1,10 +1,11 @@
 from django.core.cache import cache
+from django.utils import timezone
 
 PERMISSION_CACHE_TIMEOUT = 3600
 
 
 def get_permissions_cache_key(user):
-    return f"user_permissions_{user.id}"
+    return f"user_permissions_v2_{user.id}"
 
 
 def get_user_roles(user):
@@ -55,7 +56,16 @@ def get_user_permissions(user):
 
         permissions = sorted(permissions_set)
 
-    cache.set(cache_key, permissions, PERMISSION_CACHE_TIMEOUT)
+    timeout = PERMISSION_CACHE_TIMEOUT
+    if not user.is_superuser:
+        next_expiry = (
+            user.user_roles.filter(is_active=True, expires_at__gt=timezone.now())
+            .order_by("expires_at").values_list("expires_at", flat=True).first()
+        )
+        if next_expiry is not None:
+            seconds = int((next_expiry - timezone.now()).total_seconds())
+            timeout = min(timeout, max(1, seconds))
+    cache.set(cache_key, permissions, timeout)
 
     return permissions
 
