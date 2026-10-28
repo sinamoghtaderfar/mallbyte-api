@@ -28,6 +28,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=300
 WorkingDirectory={root}
 ExecStart={sys.executable} {root / 'deploy/observability_ops/host_runner.py'}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin

@@ -111,7 +111,7 @@ class WorkflowTests(APITestCase):
         incident.source_error=source
         incident.save(update_fields=['source_error'])
         ctx=build_context(incident)
-        self.assertEqual(ctx['route_template'], '/api/orders/{id}/')
+        self.assertEqual(ctx['observed_evidence']['route_template'], '/api/orders/{id}/')
         self.assertNotIn('traceback', ctx)
         self.assertNotIn('incident_description', ctx)
         self.assertNotIn('message', ctx)
@@ -129,13 +129,13 @@ class WorkflowTests(APITestCase):
         with patch('apps.observability.workflow_views.run_observability_ai_diagnosis.delay') as send:
             with self.captureOnCommitCallbacks(execute=True):
                 result = self.client.post(f'/api/observability/incidents/{incident_id}/diagnose/',
-                    {'include_description':False,'consent_to_external_processing':True},format='json')
+                    {'include_description':True,'consent_to_external_processing':True},format='json')
             self.assertEqual(result.status_code,202,result.data)
             self.assertEqual(result.data['status'],'queued')
             send.assert_called_once()
             self.assertEqual(Incident.objects.get(pk=incident_id).status,'open')
         self.assertEqual(self.client.post(f'/api/observability/incidents/{incident_id}/diagnose/',
-            {'consent_to_external_processing':True},format='json').status_code,429)
+            {'include_description':True,'consent_to_external_processing':True},format='json').status_code,429)
 
     @override_settings(OBSERVABILITY_AI_ENABLED="auto", OBSERVABILITY_AI_API_KEY="test-key")
     def test_ai_task_saves_provider_result_when_mocked(self):

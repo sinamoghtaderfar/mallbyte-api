@@ -1,5 +1,6 @@
 """Provider I/O outside web workers; runs only after explicit consented API request."""
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from apps.observability.ai_diagnosis import AIUnavailable, ask_ai_diagnosis
 from apps.observability.workflow_models import AIDiagnosis
@@ -13,7 +14,9 @@ def run_observability_ai_diagnosis(self, diagnosis_id):
         if not diagnosis or diagnosis.status != AIDiagnosis.Status.QUEUED:
             return {"status": "ignored"}
         diagnosis.status = AIDiagnosis.Status.RUNNING
-        diagnosis.save(update_fields=["status", "updated_at"])
+        # Record the provider model even if the downstream call fails.
+        diagnosis.model_name = str(getattr(settings, "OBSERVABILITY_AI_MODEL", "unconfigured"))[:100]
+        diagnosis.save(update_fields=["status", "model_name", "updated_at"])
     try:
         model, report = ask_ai_diagnosis(
             diagnosis.incident, include_description=diagnosis.include_description

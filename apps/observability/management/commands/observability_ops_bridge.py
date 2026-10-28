@@ -35,7 +35,7 @@ class Command(BaseCommand):
             # Read-only audit preview for host startup checks. No tokens.
             jobs = list(Operation.objects.filter(status=Operation.Status.APPROVED,
                 approved_by__isnull=False, requested_by__isnull=False,
-                expires_at__gt=timezone.now(), target__in=SAFE_TARGETS)
+                expires_at__gt=timezone.now(), approved_at__isnull=False, target__in=SAFE_TARGETS)
                 .exclude(approved_by_id=F("requested_by_id"))
                 .order_by("created_at").values("id", "target")[:5])
             self.stdout.write(json.dumps({"pending": [{"id": str(j["id"]), "target": j["target"]} for j in jobs]}))

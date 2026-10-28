@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from apps.observability.ai_diagnosis import ai_ready
+from apps.observability.ai_diagnosis import ai_ready, has_diagnostic_evidence
 from apps.observability.models import AuditLog
 from apps.observability.permissions import allowed
 from apps.observability.services import create_audit_log
@@ -178,6 +178,13 @@ class IncidentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         if not ai_ready():
             return Response({"detail": "Configure OBSERVABILITY_AI_API_KEY on web and Celery worker."}, status=503)
         obj = self.get_object()
+        if not has_diagnostic_evidence(
+            obj, include_description=data.validated_data["include_description"]
+        ):
+            raise ValidationError({
+                "detail": "Insufficient diagnostic evidence: attach an Error Log, or explicitly "
+                          "allow a meaningful incident description to be sent to AI."
+            })
         # Database row lock: cooldown remains valid even with per-process cache fallback.
         with transaction.atomic():
             obj = Incident.objects.select_for_update().get(pk=obj.pk)
