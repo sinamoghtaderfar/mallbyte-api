@@ -2,6 +2,8 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from django.urls import reverse
+from apps.support.attachment_validation import validate_support_attachment
 
 from apps.support.models import (
     SupportTag,
@@ -44,6 +46,12 @@ class SupportTagSerializer(serializers.ModelSerializer):
 
 
 class TicketAttachmentSerializer(serializers.ModelSerializer):
+    file = serializers.FileField(write_only=True, validators=[validate_support_attachment])
+    download_url = serializers.SerializerMethodField()
+
+    def get_download_url(self, obj):
+        return reverse("support-ticket-download-attachment", args=[obj.ticket_id, obj.pk])
+
     uploaded_by_display = serializers.CharField(
         source="uploaded_by.full_name",
         read_only=True,
@@ -58,6 +66,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "uploaded_by",
             "uploaded_by_display",
             "file",
+            "download_url",
             "original_filename",
             "content_type",
             "size",
@@ -73,6 +82,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "content_type",
             "size",
             "created_at",
+            "download_url",
         ]
 
 
