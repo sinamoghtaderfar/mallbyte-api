@@ -1,6 +1,7 @@
 import csv
 
 import pandas as pd
+from django.db.models import Q
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -13,7 +14,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from apps.products.services import create_product_notification
-from apps.rbac.permissions import IsProductAdmin, IsVendor
+from apps.rbac.permissions import IsProductAdmin, IsVendor, user_has_active_role
 
 from .filters import ProductFilter
 from .models import (
@@ -149,21 +150,32 @@ class ProductViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-
-        if user.is_authenticated and (user.is_superuser or user.is_staff):
-            return queryset
-
-        if (
-            user.is_authenticated
-            and hasattr(user, "seller")
-            and user.seller.is_verified
-        ):
-            return queryset.filter(seller=user)
-
-        return queryset.filter(
+        action = getattr(self, "action", None)
+        publicly_visible = Q(
             status=Product.StatusChoices.APPROVED,
             is_active=True,
         )
+
+        # Storefront queries must not change when a customer is also a seller.
+        if action in ("list", "related", "add_view", "featured"):
+            return queryset.filter(publicly_visible)
+
+        if action == "retrieve":
+            # Sellers need to inspect their own drafts, but not other sellers'
+            # unpublished products. Product admins can moderate all statuses.
+            if user.is_authenticated:
+                if user.is_superuser or user_has_active_role(user, "product_admin"):
+                    return queryset
+                if hasattr(user, "seller") and user.seller.is_verified:
+                    return queryset.filter(publicly_visible | Q(seller=user))
+            return queryset.filter(publicly_visible)
+
+        if action in ("update", "partial_update", "destroy"):
+            # An approved product from another seller must never be editable.
+            return queryset.filter(seller=user)
+
+        # Moderation actions are separately protected by IsProductAdmin.
+        return queryset
 
     def perform_create(self, serializer):
         product = serializer.save(
