@@ -1,4 +1,8 @@
 from django.contrib.auth import get_user_model
+from django.http import FileResponse, Http404
+from django.utils.http import content_disposition_header
+from apps.support.attachment_validation import SUPPORT_ATTACHMENT_MIME_TYPES
+from pathlib import Path
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -86,6 +90,10 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
     action_permission_classes = {
         "attachments": [
+            IsAuthenticated,
+            CanAccessSupportAttachments,
+        ],
+        "download_attachment": [
             IsAuthenticated,
             CanAccessSupportAttachments,
         ],
@@ -301,6 +309,29 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get"], url_path=r"attachments/(?P<attachment_id>[0-9]+)/download")
+    def download_attachment(self, request, pk=None, attachment_id=None):
+        ticket = self.get_object()
+        attachment = ticket.attachments.filter(pk=attachment_id).first()
+        if attachment is None:
+            raise Http404
+
+        try:
+            stream = attachment.file.open("rb")
+        except (FileNotFoundError, OSError, ValueError):
+            raise Http404
+
+        name = Path(attachment.original_filename).name or "attachment"
+        extension = Path(name).suffix.lower()
+        response = FileResponse(
+            stream,
+            content_type=SUPPORT_ATTACHMENT_MIME_TYPES.get(extension, "application/octet-stream"),
+        )
+        response["Content-Disposition"] = content_disposition_header(True, name)
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
     @action(
         detail=True,
         methods=["get", "post"],
@@ -361,11 +392,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
                 "name",
                 "",
             ),
-            content_type=getattr(
-                uploaded_file,
-                "content_type",
-                "",
-            ),
+            content_type=SUPPORT_ATTACHMENT_MIME_TYPES[Path(uploaded_file.name).suffix.lower()],
             size=(
                 getattr(
                     uploaded_file,
