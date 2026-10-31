@@ -178,6 +178,7 @@ STATIC_ROOT = BASE_DIR / "static"
 # Media files
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+SUPPORT_PRIVATE_MEDIA_ROOT = Path(os.getenv("SUPPORT_PRIVATE_MEDIA_ROOT", str(BASE_DIR / "private_media")))
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

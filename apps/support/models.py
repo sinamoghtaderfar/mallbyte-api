@@ -2,6 +2,7 @@ import os
 import uuid
 
 from django.conf import settings
+from apps.support.storage import SupportAttachmentStorage
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -233,6 +234,12 @@ class TicketMessage(models.Model):
         return f"Message on {self.ticket.ticket_number} by {self.sender}"
 
 
+def support_attachment_path(instance, filename):
+    # Do not store user-controlled names as filesystem paths.
+    extension = os.path.splitext(filename)[1].lower()
+    return f"support/attachments/{uuid.uuid4().hex}{extension}"
+
+
 class TicketAttachment(models.Model):
     ticket = models.ForeignKey(
         SupportTicket,
@@ -254,7 +261,7 @@ class TicketAttachment(models.Model):
         related_name="support_attachments",
     )
 
-    file = models.FileField(upload_to="support/attachments/")
+    file = models.FileField(upload_to=support_attachment_path, storage=SupportAttachmentStorage())
     original_filename = models.CharField(max_length=255, blank=True)
     content_type = models.CharField(max_length=120, blank=True)
     size = models.PositiveBigIntegerField(default=0)
