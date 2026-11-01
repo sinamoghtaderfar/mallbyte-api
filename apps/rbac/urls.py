@@ -1,4 +1,5 @@
 from django.urls import include, path
+from .super_admin import ConsoleOverviewView, ConsoleUsersViewSet, ConsoleProductsViewSet, ConsoleRolesView, ConsoleRolePermissionView
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -17,11 +18,16 @@ from .views import (
 
 router = DefaultRouter()
 router.register("roles", RoleViewSet, basename="role")
+router.register("console/users", ConsoleUsersViewSet, basename="console-users")
+router.register("console/products", ConsoleProductsViewSet, basename="console-products")
 router.register("permissions", PermissionViewSet, basename="permission")
 router.register("user-roles", UserRoleViewSet, basename="user-role")
 
 
 urlpatterns = [
+    path("console/overview/", ConsoleOverviewView.as_view(), name="console-overview"),
+    path("console/role-catalog/", ConsoleRolesView.as_view(), name="console-role-catalog"),
+    path("console/roles/<int:pk>/permissions/", ConsoleRolePermissionView.as_view(), name="console-role-permissions"),
     path("", include(router.urls)),
     path("assign-role/", AssignRoleView.as_view(), name="assign_role"),
     path(
