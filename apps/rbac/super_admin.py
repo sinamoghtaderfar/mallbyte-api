@@ -1,7 +1,7 @@
 """Super administrator operations. Privileged actions never trust frontend gates."""
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Q
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -12,10 +12,10 @@ from apps.accounts.models import Seller
 from apps.orders.models import Order
 from apps.products.models import Product
 from apps.support.models import SupportTicket
-from .models import Role, RolePermission, UserRole, AdminLog
+from .models import Role, RolePermission, AdminLog, Permission
 from .permissions import IsSuperAdmin
-from .serializers import RoleSerializer, PermissionSerializer, AdminLogSerializer, UserRoleSerializer
-from .utils import assign_role, remove_role, clear_role_permissions_cache, log_admin_action
+from .serializers import RoleSerializer, PermissionSerializer
+from .utils import clear_role_permissions_cache, log_admin_action
 
 User = get_user_model()
 
@@ -132,7 +132,7 @@ class ConsoleRolesView(APIView):
     def get(self, request):
         return Response({
             "roles": RoleSerializer(Role.objects.prefetch_related("role_permissions__permission"), many=True).data,
-            "permissions": PermissionSerializer(__import__("apps.rbac.models", fromlist=["Permission"]).Permission.objects.all(), many=True).data,
+            "permissions": PermissionSerializer(Permission.objects.all(), many=True).data,
         })
 
 
