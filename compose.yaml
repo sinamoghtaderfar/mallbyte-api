@@ -19,6 +19,9 @@ services:
       redis:
         condition: service_healthy
 
+    volumes:
+      - private_support_media:/app/private_media
+
     networks:
       - mallbyte_backend
 
@@ -35,7 +38,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
 
     expose:
       - "5432"
@@ -67,6 +70,7 @@ services:
 
 volumes:
   postgres_data:
+  private_support_media:
 
 networks:
   mallbyte_backend:
