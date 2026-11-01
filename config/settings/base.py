@@ -117,35 +117,15 @@ DATABASES = {
         "PORT": os.getenv("DB_PORT", "5432"),
     }
 }
-# Cache settings for Redis
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/1",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "SOCKET_CONNECT_TIMEOUT": 5,
-            "SOCKET_TIMEOUT": 5,
-            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
-        },
-    }
-}
-##########################
-if DEBUG:
-    try:
-        import redis
+# Cache: deterministic configuration; Redis is mandatory outside DEBUG.
+from .cache import build_cache_settings
 
-        r = redis.Redis(host="localhost", port=6379, socket_connect_timeout=2)
-        r.ping()
-    except Exception:
-        CACHES = {
-            "default": {
-                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            }
-        }
+CACHES = build_cache_settings(
+    debug=DEBUG,
+    backend=os.getenv("CACHE_BACKEND"),
+    redis_url=os.getenv("CACHE_REDIS_URL") or os.getenv("REDIS_URL"),
+)
 
-
-####################
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -257,12 +237,12 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 CELERY_BROKER_URL = os.getenv(
     "CELERY_BROKER_URL",
-    "redis://127.0.0.1:6379/1",
+    os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
 )
 
 CELERY_RESULT_BACKEND = os.getenv(
     "CELERY_RESULT_BACKEND",
-    "redis://127.0.0.1:6379/2",
+    os.getenv("REDIS_RESULT_URL", "redis://127.0.0.1:6379/2"),
 )
 
 CELERY_ACCEPT_CONTENT = ["json"]

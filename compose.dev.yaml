@@ -8,6 +8,8 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+      # Preserve existing local support files and other working-tree media.
+      - ./private_media:/app/private_media
 
   celery_worker:
     build:
