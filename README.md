@@ -221,7 +221,7 @@ The local stack includes:
 - optional Celery beat
 - optional Mailpit email testing UI
 
-PostgreSQL is kept inside the Docker network and is not published directly to the host machine.
+PostgreSQL is reachable on the Docker network and exposed to the development host only at `127.0.0.1:5433` (not on external interfaces).
 
 ### Requirements
 
@@ -284,6 +284,10 @@ http://localhost:8000/
 
 The project uses environment variables for Django, PostgreSQL, Redis, Celery, CORS, and email settings.
 
+In Docker development, `CACHE_BACKEND=redis` and `CACHE_REDIS_URL=redis://redis:6379/1` use the Docker service hostname. Plain DEBUG development without a Redis URL defaults to a local-memory cache; with `DEBUG=False`, Redis must be configured. Celery uses its own broker/result URLs.
+
+Support uploads are stored outside public `/media/`. Docker development mounts `./private_media` into the container, so existing local files survive a container rebuild. The base Compose configuration uses the named `private_support_media` volume for persistence; this development override keeps existing local files in place. Back up private files and confirm the production volume is mounted before deploying. Never expose the private directory through a reverse proxy.
+
 For Docker development, start from:
 
 ```bash
@@ -307,7 +311,8 @@ DB_HOST=db
 DB_PORT=5432
 
 REDIS_URL=redis://redis:6379/0
-CACHE_REDIS_URL=redis://redis:6379/0
+CACHE_BACKEND=redis
+CACHE_REDIS_URL=redis://redis:6379/1
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
 
@@ -621,7 +626,7 @@ Keep SMTP credentials only in `.env.docker` or another ignored environment file.
 
 The Docker setup uses PostgreSQL 16.
 
-The database service is available only inside the Docker network. It is not exposed as a public host port in the base Compose configuration.
+The database service is available inside Docker and, for local development tools, on host loopback `127.0.0.1:5433`. It is not published on external host interfaces.
 
 Open PostgreSQL shell:
 
