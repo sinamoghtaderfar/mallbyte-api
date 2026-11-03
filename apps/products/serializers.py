@@ -72,42 +72,57 @@ class TagSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'slug', 'created_at']
 
 class ProductListSerializer(serializers.ModelSerializer):
-    """Serializer for listing products"""
+    """Optimized public catalog representation using optional queryset aggregates."""
+
     main_image = serializers.SerializerMethodField()
-    brand_name = serializers.ReadOnlyField(source='brand.name')
-    category_name = serializers.ReadOnlyField(source='category.name')
+    brand_name = serializers.ReadOnlyField(source="brand.name")
+    category_name = serializers.ReadOnlyField(source="category.name")
     final_price = serializers.ReadOnlyField()
-    
-    stock = serializers.IntegerField(read_only=True)
-    available_stock = serializers.IntegerField(read_only=True)
-    reserved_stock = serializers.IntegerField(read_only=True)
-    
+    stock = serializers.SerializerMethodField()
+    available_stock = serializers.SerializerMethodField()
+    reserved_stock = serializers.SerializerMethodField()
     label_display = serializers.SerializerMethodField()
-    def get_label_display(self, obj):
-        labels_map = {
-            'new': 'New',
-            'bestseller': 'Bestseller',
-            'discounted': 'Discounted',
-            'limited': 'Limited Edition',
-            'preorder': 'Pre-order'
-        }
-        return [labels_map.get(label, label) for label in obj.labels]
-    
+
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'slug', 'main_image', 'price', 'compare_price',
-            'final_price', 'brand_name', 'category_name',
-            'stock', 'available_stock', 'reserved_stock',
-            'is_featured', 'views_count', 'created_at',
-            'barcode', 'labels', 'label_display'
+            "id", "name", "slug", "main_image", "price", "compare_price",
+            "final_price", "brand_name", "category_name",
+            "stock", "available_stock", "reserved_stock",
+            "is_featured", "views_count", "created_at",
+            "barcode", "labels", "label_display",
         ]
-    
+
+    def get_stock(self, obj):
+        return getattr(obj, "_catalog_stock", obj.stock)
+
+    def get_reserved_stock(self, obj):
+        return getattr(obj, "_catalog_reserved", obj.reserved_stock)
+
+    def get_available_stock(self, obj):
+        if hasattr(obj, "_catalog_stock") and hasattr(obj, "_catalog_reserved"):
+            return obj._catalog_stock - obj._catalog_reserved
+        return obj.available_stock
+
+    def get_label_display(self, obj):
+        labels_map = {
+            "new": "New",
+            "bestseller": "Bestseller",
+            "discounted": "Discounted",
+            "limited": "Limited Edition",
+            "preorder": "Pre-order",
+        }
+        return [labels_map.get(label, label) for label in (obj.labels or [])]
+
     def get_main_image(self, obj):
-        main_image = obj.images.filter(is_main=True).first()
-        if main_image:
-            return main_image.image.url
-        return None
+        # Public listing querysets prefetch main images to avoid a query per product.
+        if hasattr(obj, "_catalog_main_images"):
+            image = next(iter(obj._catalog_main_images), None)
+        else:
+            image = obj.images.filter(is_main=True).first()
+        return image.image.url if image else None
+
+
 class ProductVariantSerializer(serializers.ModelSerializer):
     """Serializer for ProductVariant model"""
     final_price = serializers.ReadOnlyField()
