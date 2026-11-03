@@ -189,7 +189,15 @@ class OTPVerifyView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = User.objects.filter(email=email).first()
+        # The public manager hides soft-deleted users. Looking up all records
+        # prevents an OTP from recreating an existing deleted account and
+        # ensures suspended accounts never receive fresh JWTs.
+        user = User.objects.all_with_deleted().filter(email=email).first()
+        if user is not None and (not user.is_active or user.is_deleted):
+            return Response(
+                {"error": "Account unavailable. Please contact support."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         created = False
 
         if user is None:
