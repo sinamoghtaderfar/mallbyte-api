@@ -1,0 +1,38 @@
+# Use behind a trusted HTTPS reverse proxy.
+# PostgreSQL and Redis are external managed services (configure in .env.production).
+# Never use compose.yaml development credentials in production.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    env_file:
+      - .env.production
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DEBUG: "False"
+      CACHE_BACKEND: redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - public_media:/app/media
+      - private_support_media:/app/private_media
+      - staticfiles:/app/static
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - app_network
+
+volumes:
+  public_media:
+  private_support_media:
+  staticfiles:
+
+networks:
+  app_network:
+    driver: bridge
