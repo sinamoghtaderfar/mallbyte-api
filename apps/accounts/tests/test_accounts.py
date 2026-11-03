@@ -403,6 +403,38 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
         self.assertIsNotNone(user.email_verified_at)
 
     @override_settings(**EMAIL_TEST_SETTINGS)
+    def test_otp_verify_rejects_suspended_user_without_issuing_token(self):
+        self.create_user(email="suspended-otp@example.com", is_active=False)
+        otp = OTP.generate_otp(email="suspended-otp@example.com")
+        response = self.client.post(
+            "/api/auth/otp/verify/",
+            {"email": "suspended-otp@example.com", "code": otp.code},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertNotIn("access", response.data)
+        self.assertNotIn(get_refresh_cookie_name(), response.cookies)
+        self.assertEqual(User.objects.all_with_deleted().filter(email="suspended-otp@example.com").count(), 1)
+
+    @override_settings(**EMAIL_TEST_SETTINGS)
+    def test_otp_verify_rejects_soft_deleted_user_without_recreating(self):
+        user = self.create_user(email="deleted-otp@example.com", is_active=False)
+        user.is_deleted = True
+        user.deleted_at = timezone.now()
+        user.save(update_fields=["is_deleted", "deleted_at"])
+        otp = OTP.generate_otp(email="deleted-otp@example.com")
+        response = self.client.post(
+            "/api/auth/otp/verify/",
+            {"email": "deleted-otp@example.com", "code": otp.code},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertNotIn("access", response.data)
+        self.assertEqual(
+            User.objects.all_with_deleted().filter(email="deleted-otp@example.com").count(), 1
+        )
+
+    @override_settings(**EMAIL_TEST_SETTINGS)
     def test_otp_verify_rejects_invalid_code(self):
         OTP.generate_otp(email="invalid-verify@example.com")
 
