@@ -5,10 +5,11 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.accounts.views import CookieTokenRefreshView, ThrottledTokenObtainPairView
-from config.views import api_home
+from config.views import api_home, liveness
 
 urlpatterns = [
     path("", api_home, name="api_home"),
+    path("healthz/", liveness, name="liveness"),
     path("admin/", admin.site.urls),
     path(
         "api/auth/token/",

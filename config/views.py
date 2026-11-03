@@ -20,3 +20,8 @@ def api_home(request):
             },
         }
     )
+
+
+def liveness(request):
+    """Side-effect-free liveness probe: no credentials or infrastructure details."""
+    return JsonResponse({"status": "ok"})
