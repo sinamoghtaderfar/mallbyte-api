@@ -1,7 +1,9 @@
 import csv
 
 import pandas as pd
-from django.db.models import Q
+from django.db.models import F, IntegerField, Prefetch, Q, Sum, Value
+from django.db.models.functions import Coalesce
+from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -43,6 +45,15 @@ from .serializers import (
     TagSerializer,
     WishlistSerializer,
 )
+
+class CatalogOrderingFilter(filters.OrderingFilter):
+    """Relevance-first search unless the customer explicitly chooses a sort order."""
+
+    def get_ordering(self, request, queryset, view):
+        if request.query_params.get("search", "").strip() and not request.query_params.get("ordering"):
+            return ["-_catalog_relevance", "-created_at", "-id"]
+        return super().get_ordering(request, queryset, view)
+
 
 # ==================== Category Views ====================
 
@@ -124,7 +135,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     filter_backends = [
         DjangoFilterBackend,
         filters.SearchFilter,
-        filters.OrderingFilter,
+        CatalogOrderingFilter,
     ]
     filterset_class = ProductFilter
     search_fields = ["name", "description", "sku", "brand__name"]
@@ -157,7 +168,38 @@ class ProductViewSet(viewsets.ModelViewSet):
         )
 
         # Storefront queries must not change when a customer is also a seller.
-        if action in ("list", "related", "add_view", "featured"):
+        if action == "list":
+            # One aggregate query plus one image prefetch replaces per-product stock
+            # and image lookups. Public visibility is always enforced first.
+            queryset = (
+                queryset.filter(publicly_visible)
+                .select_related("brand", "category")
+                .prefetch_related(
+                    Prefetch(
+                        "images",
+                        queryset=ProductImage.objects.filter(is_main=True).order_by("order", "pk"),
+                        to_attr="_catalog_main_images",
+                    )
+                )
+                .annotate(
+                    _catalog_stock=Coalesce(Sum("stock_items__quantity"), Value(0), output_field=IntegerField()),
+                    _catalog_reserved=Coalesce(Sum("stock_items__reserved_quantity"), Value(0), output_field=IntegerField()),
+                )
+            )
+            search = self.request.query_params.get("search", "").strip()
+            if search:
+                vector = (
+                    SearchVector("name", weight="A", config="simple")
+                    + SearchVector("sku", weight="A", config="simple")
+                    + SearchVector("brand__name", weight="B", config="simple")
+                    + SearchVector("description", weight="C", config="simple")
+                )
+                queryset = queryset.annotate(
+                    _catalog_relevance=SearchRank(vector, SearchQuery(search, search_type="websearch", config="simple"))
+                )
+            return queryset
+
+        if action in ("related", "add_view", "featured"):
             return queryset.filter(publicly_visible)
 
         if action == "retrieve":
