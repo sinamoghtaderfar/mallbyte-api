@@ -1,0 +1,30 @@
+name: Production image smoke check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  production-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build runtime image without development dependencies
+        run: docker build -f Dockerfile.production -t mallbyte-api-production:test .
+      - name: Validate Django production configuration
+        run: |
+          docker run --rm \
+            -e DJANGO_SETTINGS_MODULE=config.settings.production \
+            -e SECRET_KEY=ci-only-placeholder-do-not-deploy \
+            -e ALLOWED_HOSTS=example.com \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            -e CACHE_BACKEND=redis \
+            -e CACHE_REDIS_URL=redis://localhost:6379/1 \
+            mallbyte-api-production:test python manage.py check --deploy
