@@ -1,4 +1,6 @@
 from django.urls import reverse
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -138,3 +140,54 @@ class ProductVisibilityAndOwnershipTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.pending_b.refresh_from_db()
         self.assertEqual(self.pending_b.status, Product.StatusChoices.APPROVED)
+
+    def test_public_catalog_listing_uses_bounded_database_queries(self):
+        for index in range(25):
+            self.make_product(
+                self.seller_a, f"Performance Product {index}", "approved", True
+            )
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(reverse("product-list"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data["results"]), 20)
+        self.assertEqual(response.data["count"], 27)
+        # Pagination, aggregate and a single prefetched image query should
+        # stay bounded regardless of how many products are serialized.
+        self.assertLessEqual(len(queries), 7)
+
+    def test_default_search_ranks_name_above_description(self):
+        name_match = self.make_product(
+            self.seller_a, "Premium Laptop", "approved", True
+        )
+        desc_match = self.make_product(
+            self.seller_a, "Basic Laptop", "approved", True
+        )
+        desc_match.description = "Premium materials included"
+        desc_match.save(update_fields=["description"])
+
+        response = self.client.get(reverse("product-list"), {"search": "premium"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result_ids = [item["id"] for item in response.data["results"]]
+        self.assertIn(name_match.pk, result_ids)
+        self.assertIn(desc_match.pk, result_ids)
+        self.assertLess(result_ids.index(name_match.pk), result_ids.index(desc_match.pk))
+
+    def test_explicit_sort_overrides_default_search_relevance(self):
+        name_match = self.make_product(
+            self.seller_a, "Premium Laptop", "approved", True
+        )
+        desc_match = self.make_product(
+            self.seller_a, "Basic Laptop", "approved", True
+        )
+        name_match.price = 200
+        name_match.save(update_fields=["price"])
+        desc_match.price = 50
+        desc_match.description = "Premium materials included"
+        desc_match.save(update_fields=["price", "description"])
+
+        response = self.client.get(
+            reverse("product-list"), {"search": "premium", "ordering": "price"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        result_ids = [item["id"] for item in response.data["results"]]
+        self.assertLess(result_ids.index(desc_match.pk), result_ids.index(name_match.pk))
