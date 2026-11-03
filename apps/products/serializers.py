@@ -94,10 +94,10 @@ class ProductListSerializer(serializers.ModelSerializer):
         ]
 
     def get_stock(self, obj):
-        return getattr(obj, "_catalog_stock", obj.stock)
+        return obj._catalog_stock if hasattr(obj, "_catalog_stock") else obj.stock
 
     def get_reserved_stock(self, obj):
-        return getattr(obj, "_catalog_reserved", obj.reserved_stock)
+        return obj._catalog_reserved if hasattr(obj, "_catalog_reserved") else obj.reserved_stock
 
     def get_available_stock(self, obj):
         if hasattr(obj, "_catalog_stock") and hasattr(obj, "_catalog_reserved"):
