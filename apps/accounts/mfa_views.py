@@ -113,7 +113,7 @@ class AdminMFASetupView(APIView):
 
 class AdminMFACompleteView(APIView):
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [AuthIPRateThrottle]
+    throttle_classes = [MFAIPRateThrottle]
 
     def post(self, request):
         serializer = VerifyInput(data=request.data)
@@ -142,7 +142,7 @@ class AdminMFACompleteView(APIView):
 
 class AdminMFAVerifyView(APIView):
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [AuthIPRateThrottle]
+    throttle_classes = [MFAIPRateThrottle]
 
     def post(self, request):
         serializer = VerifyInput(data=request.data)
