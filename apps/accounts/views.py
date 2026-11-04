@@ -62,16 +62,6 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         user = serializer.save()
-        if is_privileged(user):
-            # Email verification is first factor only; never issue privileged JWTs here.
-            token = AdminMFAChallenge.issue(user)
-            enrolled = getattr(user, "admin_mfa", None)
-            return Response({
-                "mfa_required": True,
-                "challenge": token,
-                "mfa_enrolled": bool(enrolled and enrolled.enabled),
-            })
-
         refresh = RefreshToken.for_user(user)
 
         response = Response(
@@ -237,6 +227,16 @@ class OTPVerifyView(generics.GenericAPIView):
 
         if update_fields:
             user.save(update_fields=update_fields)
+
+        if is_privileged(user):
+            # Email verification is first factor only; never issue privileged JWTs here.
+            token = AdminMFAChallenge.issue(user)
+            enrolled = getattr(user, "admin_mfa", None)
+            return Response({
+                "mfa_required": True,
+                "challenge": token,
+                "mfa_enrolled": bool(enrolled and enrolled.enabled),
+            })
 
         refresh = RefreshToken.for_user(user)
 
