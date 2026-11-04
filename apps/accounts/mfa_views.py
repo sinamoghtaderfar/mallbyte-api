@@ -22,7 +22,7 @@ from .mfa import (
 )
 from .mfa_models import AdminMFAChallenge, AdminMFADevice
 from .serializers import UserSerializer
-from .throttles import AuthIPRateThrottle
+from .throttles import MFAIPRateThrottle
 
 
 class ChallengeInput(serializers.Serializer):
@@ -78,7 +78,7 @@ def _authenticated_response(user, device, recovery_codes=None):
 
 class AdminMFASetupView(APIView):
     permission_classes = [permissions.AllowAny]
-    throttle_classes = [AuthIPRateThrottle]
+    throttle_classes = [MFAIPRateThrottle]
 
     def post(self, request):
         serializer = SetupInput(data=request.data)
