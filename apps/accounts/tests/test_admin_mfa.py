@@ -1,6 +1,7 @@
 import time
 
 from django.test import override_settings
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -13,6 +14,7 @@ from apps.accounts.models import OTP, User
 
 class PrivilegedMFATests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.admin = User.objects.create_superuser(
             email="mfa-admin@example.com", full_name="Admin",
             password="AdminPass123!",
