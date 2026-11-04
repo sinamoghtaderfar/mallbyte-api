@@ -166,7 +166,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django REST Framework settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.accounts.mfa_authentication.MFAGuardedJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "config.pagination.StandardPageNumberPagination",
@@ -179,6 +179,7 @@ REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
     {
         "auth_ip": os.getenv("AUTH_IP_THROTTLE_RATE", "100/hour"),
+        "mfa_ip": os.getenv("MFA_IP_THROTTLE_RATE", "20/hour"),
         "otp_ip": os.getenv("OTP_IP_THROTTLE_RATE", "30/hour"),
         "otp_email": os.getenv("OTP_EMAIL_THROTTLE_RATE", "10/hour"),
         "password_reset_ip": os.getenv(
