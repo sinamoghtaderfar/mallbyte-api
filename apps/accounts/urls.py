@@ -1,6 +1,8 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .mfa_views import AdminMFASetupView, AdminMFACompleteView, AdminMFAVerifyView
+
 from .views import (
     AddressViewSet,
     AdminDeleteUserView,
@@ -36,6 +38,9 @@ urlpatterns = [
     # OTP endpoints
     path("otp/request/", OTPRequestView.as_view(), name="otp_request"),
     path("otp/verify/", OTPVerifyView.as_view(), name="otp_verify"),
+    path("mfa/setup/", AdminMFASetupView.as_view(), name="admin_mfa_setup"),
+    path("mfa/complete/", AdminMFACompleteView.as_view(), name="admin_mfa_complete"),
+    path("mfa/verify/", AdminMFAVerifyView.as_view(), name="admin_mfa_verify"),
 
     # User endpoints
     path("register/", RegisterView.as_view(), name="register"),
