@@ -1,4 +1,4 @@
-import random
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
@@ -233,7 +233,7 @@ class OTP(models.Model):
         is_used=False,
     ).update(is_used=True)
 
-        code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+        code = "".join(str(secrets.randbelow(10)) for _ in range(6))
 
         expires_at = timezone.now() + timedelta(
             seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)
