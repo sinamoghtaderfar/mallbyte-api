@@ -4,6 +4,12 @@ from .base import *
 
 DEBUG = False
 
+# Separate, stable Fernet key for encrypted privileged authenticator seeds.
+MFA_FERNET_KEY = os.environ["MFA_FERNET_KEY"]
+# Django admin uses session passwords, not the MFA-protected JWT flow.
+# Keep it unavailable in production until Django admin-specific MFA is integrated.
+DJANGO_ADMIN_ENABLED = False
+
 SECRET_KEY = os.environ["SECRET_KEY"]
 
 ALLOWED_HOSTS = [
@@ -47,6 +53,7 @@ REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
     {
         "auth_ip": os.getenv("AUTH_IP_THROTTLE_RATE", "20/hour"),
+        "mfa_ip": os.getenv("MFA_IP_THROTTLE_RATE", "10/hour"),
         "otp_ip": os.getenv("OTP_IP_THROTTLE_RATE", "10/hour"),
         "otp_email": os.getenv("OTP_EMAIL_THROTTLE_RATE", "5/hour"),
         "password_reset_ip": os.getenv(
