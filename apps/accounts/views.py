@@ -18,6 +18,8 @@ from apps.accounts.cookies import (
 )
 
 from .models import OTP, Address, Profile, Seller
+from .mfa import is_privileged, privileged_token_valid
+from .mfa_models import AdminMFAChallenge
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
 from .serializers import (
     AddressSerializer,
@@ -60,6 +62,16 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         user = serializer.save()
+        if is_privileged(user):
+            # Email verification is first factor only; never issue privileged JWTs here.
+            token = AdminMFAChallenge.issue(user)
+            enrolled = getattr(user, "admin_mfa", None)
+            return Response({
+                "mfa_required": True,
+                "challenge": token,
+                "mfa_enrolled": bool(enrolled and enrolled.enabled),
+            })
+
         refresh = RefreshToken.for_user(user)
 
         response = Response(
@@ -786,6 +798,16 @@ class ThrottledTokenObtainPairView(TokenObtainPairView):
     throttle_classes = [AuthIPRateThrottle]
 
     def post(self, request, *args, **kwargs):
+        email = str(request.data.get("email", "")).strip()
+        if User.objects.filter(email__iexact=email, is_active=True).filter(
+            is_staff=True
+        ).exists() or User.objects.filter(
+            email__iexact=email, is_active=True, is_superuser=True
+        ).exists():
+            return Response(
+                {"detail": "Privileged accounts must use email OTP and authenticator MFA."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         response = super().post(request, *args, **kwargs)
 
         refresh_token = response.data.get("refresh")
@@ -818,6 +840,14 @@ class CookieTokenRefreshView(generics.GenericAPIView):
 
         try:
             refresh = RefreshToken(raw_refresh_token)
+            user = User.objects.all_with_deleted().filter(pk=refresh.get("user_id")).first()
+            if not user or not user.is_active or user.is_deleted or not privileged_token_valid(user, refresh):
+                response = Response(
+                    {"detail": "Session expired or additional verification is required."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+                clear_refresh_cookie(response)
+                return response
             access_token = str(refresh.access_token)
 
         except TokenError:
