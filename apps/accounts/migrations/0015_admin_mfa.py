@@ -33,6 +33,7 @@ class Migration(migrations.Migration):
                 ("expires_at", models.DateTimeField()),
                 ("used_at", models.DateTimeField(blank=True, null=True)),
                 ("attempts", models.PositiveSmallIntegerField(default=0)),
+                ("password_confirmed", models.BooleanField(default=False)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("user", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="mfa_challenges", to=settings.AUTH_USER_MODEL)),
             ],
