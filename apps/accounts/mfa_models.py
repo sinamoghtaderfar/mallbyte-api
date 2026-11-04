@@ -32,6 +32,7 @@ class AdminMFAChallenge(models.Model):
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)
     attempts = models.PositiveSmallIntegerField(default=0)
+    password_confirmed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
