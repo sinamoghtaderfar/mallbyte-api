@@ -1,4 +1,4 @@
-import random
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
@@ -233,7 +233,7 @@ class OTP(models.Model):
         is_used=False,
     ).update(is_used=True)
 
-        code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+        code = "".join(str(secrets.randbelow(10)) for _ in range(6))
 
         expires_at = timezone.now() + timedelta(
             seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)
@@ -419,3 +419,7 @@ class Seller(models.Model):
     @property
     def is_verified(self):
         return self.status == self.StatusChoices.APPROVED
+
+
+# Django discovers the MFA models through this module.
+from .mfa_models import AdminMFAChallenge, AdminMFADevice  # noqa: E402,F401

@@ -10,7 +10,8 @@ from config.views import api_home, liveness
 urlpatterns = [
     path("", api_home, name="api_home"),
     path("healthz/", liveness, name="liveness"),
-    path("admin/", admin.site.urls),
+    # Password-only Django admin must not bypass privileged API MFA in production.
+    *([path("admin/", admin.site.urls)] if getattr(settings, "DJANGO_ADMIN_ENABLED", settings.DEBUG) else []),
     path(
         "api/auth/token/",
         ThrottledTokenObtainPairView.as_view(),

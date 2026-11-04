@@ -23,6 +23,7 @@ jobs:
           docker run --rm \
             -e DJANGO_SETTINGS_MODULE=config.settings.production \
             -e SECRET_KEY=ci-only-placeholder-do-not-deploy \
+            -e MFA_FERNET_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
             -e ALLOWED_HOSTS=example.com \
             -e REDIS_URL=redis://localhost:6379/0 \
             -e CACHE_BACKEND=redis \

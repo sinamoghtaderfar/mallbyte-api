@@ -64,3 +64,6 @@ class PasswordResetIPRateThrottle(ScopedIPRateThrottle):
 
 class PasswordResetEmailRateThrottle(EmailFieldRateThrottle):
     scope = "password_reset_email"
+
+class MFAIPRateThrottle(ScopedIPRateThrottle):
+    scope = "mfa_ip"
