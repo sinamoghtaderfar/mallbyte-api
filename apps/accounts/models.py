@@ -419,3 +419,7 @@ class Seller(models.Model):
     @property
     def is_verified(self):
         return self.status == self.StatusChoices.APPROVED
+
+
+# Django discovers the MFA models through this module.
+from .mfa_models import AdminMFAChallenge, AdminMFADevice  # noqa: E402,F401
