@@ -12,6 +12,7 @@ from apps.accounts.mfa_models import AdminMFADevice
 from apps.accounts.models import OTP, User
 
 
+@override_settings(MFA_FERNET_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 class PrivilegedMFATests(APITestCase):
     def setUp(self):
         cache.clear()
