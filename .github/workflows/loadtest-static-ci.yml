@@ -1,0 +1,24 @@
+name: Load test configuration validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate k6 script JavaScript syntax
+        run: node --check ops/loadtest/catalog-smoke.js
+      - name: Ensure load-test safety guard exists
+        run: |
+          grep -q 'ALLOW_EXTERNAL_LOAD' ops/loadtest/catalog-smoke.js
+          grep -q 'catalog_failures' ops/loadtest/catalog-smoke.js
+          grep -q 'http_req_duration' ops/loadtest/catalog-smoke.js
