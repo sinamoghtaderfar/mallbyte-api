@@ -28,6 +28,43 @@ services:
     networks:
       - app_network
 
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    env_file:
+      - .env.production
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DEBUG: "False"
+      CACHE_BACKEND: redis
+    command: ["celery", "-A", "config", "worker", "--loglevel=INFO"]
+    restart: unless-stopped
+    volumes:
+      - public_media:/app/media
+      - private_support_media:/app/private_media
+    networks:
+      - app_network
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    env_file:
+      - .env.production
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DEBUG: "False"
+      CACHE_BACKEND: redis
+    command: ["celery", "-A", "config", "beat", "--loglevel=INFO", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
+    restart: unless-stopped
+    volumes:
+      - public_media:/app/media
+      - private_support_media:/app/private_media
+    networks:
+      - app_network
+    # Run exactly one beat instance; never scale celery_beat horizontally.
+
 volumes:
   public_media:
   private_support_media:
