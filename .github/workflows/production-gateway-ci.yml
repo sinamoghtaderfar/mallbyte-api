@@ -21,6 +21,12 @@ jobs:
           cp .env.staging.example .env.staging
           docker compose -f compose.production.yaml config --quiet
           docker compose -f compose.staging.yaml config --quiet
+      - name: Verify deployment secrets are excluded from Git
+        run: |
+          git check-ignore -q .env.production
+          git check-ignore -q .env.staging
+          ! git check-ignore -q .env.production.example
+          ! git check-ignore -q .env.staging.example
       - name: Validate internal Nginx gateway configuration
         run: |
           docker run --rm \
