@@ -89,3 +89,16 @@ perform a negative test proving production restore targets are refused.
 
 Never run the destructive restore against production. Do not claim
 production readiness from Docker build or GitHub Actions alone.
+
+## Production runtime hardening
+
+- Docker liveness probes on `/healthz/` are intentionally exempt from HTTP-to-HTTPS redirects; all other routes remain HTTPS-only.
+- PostgreSQL requires TLS by default (`DB_SSLMODE=require`); prefer `verify-full` with your provider's CA file and hostname validation. Do not use `disable` or `prefer` in production.
+- Django's static root is `/app/static`. The separate **internal, loopback-only** Nginx gateway listens at `127.0.0.1:8080` and mounts **only** public media and collected static files read-only; private support attachments are never mounted into the gateway.
+- The operator's public TLS reverse proxy should forward HTTPS requests to port 8080 (not to the Django development port), must overwrite `X-Forwarded-Proto=https`, and must restrict the origin to trusted traffic. Never forward client-controlled proxy headers unchanged.
+- Both `/healthz/` (Django app) and `/gateway-healthz` (gateway process) are intentionally non-sensitive *liveness* responses. Neither checks PostgreSQL/Redis readiness.
+- Public media is available under `/media/`; static assets under `/static/`. In production, remember `python manage.py collectstatic --noinput` with the shared static volume mounted before deploying. The web/gateway share named volumes within their own Compose project.
+- Private attachments must always be served via authenticated Django API endpoints, never via `/media/` or a public static mount.
+- Protect public upload types and size limits separately; the gateway denies direct requests under `/private_media/`.
+
+**Do not deploy a new gateway if the existing reverse-proxy routing is not updated at the same time.** Existing loopback port 8000 is retained for application debugging; production traffic should use the internal gateway at 8080 via TLS termination.

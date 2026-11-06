@@ -26,3 +26,11 @@ setupfarsi.txt
 *.log
 *.sqlite3
 db.sqlite3
+
+# Never bake uploaded/private files, backup archives or operator secrets into images.
+private_media/
+backups/
+*.dump
+*.dump.sha256
+*.sql
+*.sql.gz

@@ -50,6 +50,26 @@ services:
       - staging_private_support_media:/app/private_media
     # Singleton scheduler; never scale.
 
+  gateway:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./deploy/nginx/mallbyte-api.conf:/etc/nginx/conf.d/default.conf:ro
+      - staging_public_media:/srv/mallbyte/media:ro
+      - staging_static:/srv/mallbyte/static:ro
+    networks:
+      - staging_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/gateway-healthz"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+
 volumes:
   staging_public_media:
   staging_private_support_media:

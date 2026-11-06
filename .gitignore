@@ -44,3 +44,9 @@ media/
 # Docker local environment
 .env.docker
 mallbyte_docker_backup.sql
+
+# Deployment secrets: always local to an operator host.
+.env.production
+.env.staging
+.env.*
+!.env.*.example
