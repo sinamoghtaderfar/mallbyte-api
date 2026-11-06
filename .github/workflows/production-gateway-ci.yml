@@ -1,0 +1,33 @@
+name: Production runtime gateway validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production and staging compose files
+        run: |
+          cp .env.production.example .env.production
+          cp .env.staging.example .env.staging
+          docker compose -f compose.production.yaml config --quiet
+          docker compose -f compose.staging.yaml config --quiet
+      - name: Validate internal Nginx gateway configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/deploy/nginx/mallbyte-api.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:stable-alpine nginx -t
+      - name: Prevent private media mount in gateway
+        run: |
+          ! grep -A20 '^  gateway:' compose.production.yaml | grep -E 'private_media|private_support_media'
+          ! grep -A20 '^  gateway:' compose.staging.yaml | grep -E 'private_media|private_support_media'
+          grep -q 'location ^~ /private_media/' deploy/nginx/mallbyte-api.conf
