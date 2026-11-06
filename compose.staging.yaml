@@ -1,0 +1,60 @@
+# Isolated staging stack using an external PostgreSQL and Redis.
+# Never connect this environment to production databases, secrets or payment accounts.
+x-app-env: &app-env
+  env_file:
+    - .env.staging
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.production
+    DEBUG: "False"
+    CACHE_BACKEND: redis
+  networks:
+    - staging_network
+  restart: unless-stopped
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile.production
+
+services:
+  web:
+    <<: *app-env
+    build: *app-build
+    command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - staging_public_media:/app/media
+      - staging_private_support_media:/app/private_media
+      - staging_static:/app/static
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  celery_worker:
+    <<: *app-env
+    build: *app-build
+    command: ["celery", "-A", "config", "worker", "--loglevel=INFO"]
+    volumes:
+      - staging_public_media:/app/media
+      - staging_private_support_media:/app/private_media
+
+  celery_beat:
+    <<: *app-env
+    build: *app-build
+    command: ["celery", "-A", "config", "beat", "--loglevel=INFO", "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"]
+    volumes:
+      - staging_public_media:/app/media
+      - staging_private_support_media:/app/private_media
+    # Singleton scheduler; never scale.
+
+volumes:
+  staging_public_media:
+  staging_private_support_media:
+  staging_static:
+
+networks:
+  staging_network:
+    driver: bridge

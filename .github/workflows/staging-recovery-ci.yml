@@ -1,0 +1,35 @@
+name: Staging and recovery scaffold validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate staging compose with dummy staging-only settings
+        run: |
+          cp .env.staging.example .env.staging
+          docker compose -f compose.staging.yaml config --quiet
+      - name: Check backup and restore shell syntax
+        run: |
+          bash -n ops/postgres-backup.sh ops/postgres-restore-staging.sh
+      - name: Ensure production restore targets are refused
+        run: |
+          set -e
+          set +e
+          DB_HOST=localhost DB_PORT=5432 DB_USER=ignored DB_PASSWORD=ignored \
+          DB_NAME=mallbyte_production BACKUP_FILE=/tmp/not-a-backup \
+          CONFIRM_STAGING_RESTORE=RESTORE_mallbyte_production \
+          STAGING_SERVICES_STOPPED=YES bash ops/postgres-restore-staging.sh
+          status=$?
+          set -e
+          test "$status" -eq 2
