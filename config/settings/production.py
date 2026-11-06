@@ -12,6 +12,19 @@ DJANGO_ADMIN_ENABLED = False
 
 SECRET_KEY = os.environ["SECRET_KEY"]
 
+# Require TLS for external PostgreSQL connections. verify-full is recommended
+# when a database provider supplies a CA certificate and hostname.
+DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
+if DB_SSLMODE not in {"require", "verify-ca", "verify-full"}:
+    raise RuntimeError("Production PostgreSQL requires SSL: DB_SSLMODE must be require, verify-ca or verify-full")
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = DB_SSLMODE
+    if os.getenv("DB_SSLROOTCERT"):
+        DATABASES["default"]["OPTIONS"]["sslrootcert"] = os.environ["DB_SSLROOTCERT"]
+    DATABASES["default"]["CONN_MAX_AGE"] = int(os.getenv("DB_CONN_MAX_AGE", "60"))
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+
+
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", "").split(",")
@@ -32,6 +45,9 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# Docker probes use internal HTTP; exempt ONLY the non-sensitive liveness route.
+# All application/API endpoints continue to redirect to HTTPS.
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
 SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() == "true"
 
 SESSION_COOKIE_SECURE = True
