@@ -7,16 +7,18 @@ Run via a dedicated systemd --user timer. Never add this script to web startup.
 import argparse
 import fcntl
 import json
-import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 SAFE_TARGETS = frozenset({"celery_worker", "celery_beat"})
 ROOT = Path(__file__).resolve().parents[2]
-COMPOSE = ["docker", "compose", "-f", "compose.yaml", "-f", "compose.dev.yaml", "--profile", "celery"]
-BRIDGE = [*COMPOSE, "exec", "-T", "web", "python", "manage.py", "observability_ops_bridge"]
+ENVIRONMENTS = {
+    "development": ("compose.yaml", "compose.dev.yaml"),
+    "staging": ("compose.staging.yaml",),
+    "production": ("compose.production.yaml",),
+}
 LOCK_DIR = Path.home() / ".cache" / "mallbyte"
 LOCK = LOCK_DIR / "observability-host-runner.lock"
 
@@ -26,8 +28,18 @@ def call(command, *, timeout=60, input=None):
                           text=True, timeout=timeout, check=False)
 
 
-def bridge(*args, input=None):
-    response = call([*BRIDGE, *args], timeout=45, input=input)
+def compose_command(environment):
+    command = ["docker", "compose"]
+    for filename in ENVIRONMENTS[environment]:
+        command.extend(["-f", filename])
+    if environment == "development":
+        command.extend(["--profile", "celery"])
+    return command
+
+
+def bridge(*args, environment, input=None):
+    command = [*compose_command(environment), "exec", "-T", "web", "python", "manage.py", "observability_ops_bridge"]
+    response = call([*command, *args], timeout=45, input=input)
     if response.returncode:
         raise RuntimeError("Database bridge failed (check Django container logs and permissions)")
     try:
@@ -38,14 +50,16 @@ def bridge(*args, input=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Poll and execute one independently approved Celery restart")
+    parser.add_argument("--environment", choices=ENVIRONMENTS, required=True)
     parser.add_argument("--dry-run", action="store_true", help="Read eligible operations; make no changes")
     args = parser.parse_args()
+    compose = compose_command(args.environment)
     if Path('/.dockerenv').exists():
         raise SystemExit("Refusing to run in a Docker container. Use the trusted Docker HOST only.")
     if not shutil.which('docker') or not (ROOT/'manage.py').is_file():
         raise SystemExit("Requires Docker Compose and repo-root manage.py on the host")
     if args.dry_run:
-        jobs = bridge("peek")
+        jobs = bridge("peek", environment=args.environment)
         print("Eligible approvals:", jobs.get("pending", []))
         return
     # Only one runner on this host; DB row-lock prevents duplicate claim across hosts.
@@ -56,7 +70,7 @@ def main():
         except BlockingIOError:
             print("Runner already active; exiting")
             return
-        claim = bridge("claim")
+        claim = bridge("claim", environment=args.environment)
         item = claim.get("operation")
         if not item:
             print("No approved Celery restart requests")
@@ -70,7 +84,7 @@ def main():
             if target not in SAFE_TARGETS:
                 raise RuntimeError("Target blocked by independent host allowlist")
             # Don't implicitly START or CREATE services. Only restart already running containers.
-            ps = call([*COMPOSE, "ps", "-q", target], timeout=25)
+            ps = call([*compose, "ps", "-q", target], timeout=25)
             ids = ps.stdout.strip().splitlines() if ps.returncode == 0 else []
             if len(ids) != 1:
                 message = "Target is not a single running service; restart refused"
@@ -79,7 +93,7 @@ def main():
                 if inspect.returncode or inspect.stdout.strip() != "true":
                     message = "Target container is not running; restart refused"
                 else:
-                    result = call([*COMPOSE, "restart", target], timeout=150)
+                    result = call([*compose, "restart", target], timeout=55)
                     if result.returncode:
                         message = f"Docker Compose restart exited {result.returncode}"
                     else:
@@ -88,7 +102,7 @@ def main():
                             outcome, message = "succeeded", "Restart returned success; container running (check service health)"
                         else:
                             # Compose may have replaced the container ID; re-query once.
-                            after = call([*COMPOSE, "ps", "-q", target], timeout=25)
+                            after = call([*compose, "ps", "-q", target], timeout=25)
                             if after.returncode == 0 and after.stdout.strip():
                                 state = call(["docker", "inspect", "-f", "{{.State.Running}}", after.stdout.strip().splitlines()[0]], timeout=20)
                                 if state.returncode == 0 and state.stdout.strip() == "true":
@@ -102,7 +116,7 @@ def main():
         # Pass ephemeral token via stdin, not process command-line arguments.
         try:
             report = bridge("complete", "--operation-id", op_id, "--outcome", outcome,
-                            "--message", message, "--token-stdin", input=token + "\n")
+                            "--message", message, "--token-stdin", environment=args.environment, input=token + "\n")
         except Exception:
             print("CRITICAL: DB completion failed; manually reconcile operation", op_id, file=sys.stderr)
             raise

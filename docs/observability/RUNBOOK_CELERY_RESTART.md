@@ -8,9 +8,9 @@ The Django web process can request/approve an operation, but **cannot** call Doc
 
 ```bash
 cd ~/projects/mallbyte-api
-python3 deploy/observability_ops/host_runner.py --dry-run
+python3 deploy/observability_ops/host_runner.py --environment development --dry-run
 # Only after reviewing runbook and confirming Docker Compose works on the host:
-python3 deploy/observability_ops/install_timer.py --install
+python3 deploy/observability_ops/install_timer.py --environment development --install
 systemctl --user status mallbyte-observability-ops.timer
 systemctl --user list-timers --all | grep mallbyte-observability
 ```
@@ -36,9 +36,9 @@ The `systemd --user` timer checks one approved request per minute. It uses the c
 
 ```bash
 cd ~/projects/mallbyte-api
-python3 deploy/observability_ops/host_runner.py --dry-run
+python3 deploy/observability_ops/host_runner.py --environment development --dry-run
 # Only after a different admin has approved a genuine operation:
-python3 deploy/observability_ops/host_runner.py
+python3 deploy/observability_ops/host_runner.py --environment development
 ```
 
 The real runner processes **one** approved operation per invocation. Do not test live restart on an important task queue without a maintenance window.
@@ -48,7 +48,7 @@ The real runner processes **one** approved operation per invocation. Do not test
 ```bash
 systemctl --user disable --now mallbyte-observability-ops.timer
 # Or remove its managed service/timer files:
-python3 deploy/observability_ops/install_timer.py --uninstall
+python3 deploy/observability_ops/install_timer.py --environment development --uninstall
 ```
 
 Disabling the timer does **not** revoke approved DB requests; review/cancel outstanding approvals before re-enabling. Approval expiry is enforced at claim.
@@ -63,3 +63,5 @@ Disabling the timer does **not** revoke approved DB requests; review/cancel outs
 ## Security boundary
 
 No Docker socket in `web` or `celery_worker`, no unrestricted user-defined Compose args, no direct restarts on GET/POST, no supervisor privilege via Django user roles. This host runner itself has high OS privilege and requires normal host change-management/audit controls.
+
+Select `--environment staging` or `--environment production` explicitly on those hosts. The runner and timer use only that environment’s fixed Compose file; there is no development fallback. Timer unit names include the environment. Remove the old `mallbyte-observability-ops.timer` unit before replacing an existing installation.
