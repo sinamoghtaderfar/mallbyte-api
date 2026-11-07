@@ -244,10 +244,10 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertIn("access", response.data)
+        self.assertTrue(response.data["verification_required"])
+        self.assertNotIn("access", response.data)
         self.assertNotIn("refresh", response.data)
-        self.assertIn(get_refresh_cookie_name(), response.cookies)
-        self.assertTrue(response.cookies[get_refresh_cookie_name()]["httponly"])
+        self.assertNotIn(get_refresh_cookie_name(), response.cookies)
         self.assertEqual(response.data["user"]["email"], "register@example.com")
 
         user = User.objects.get(email="register@example.com")

@@ -18,6 +18,7 @@ from apps.accounts.cookies import (
 )
 
 from .models import OTP, Address, Profile, Seller
+from .auth_tokens import identity_token_valid, issue_user_tokens
 from .mfa import is_privileged, privileged_token_valid
 from .mfa_models import AdminMFAChallenge
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
@@ -37,6 +38,7 @@ from .serializers import (
     SellerSerializer,
     SellerUpdateSerializer,
     UserSerializer,
+    VerifiedTokenObtainPairSerializer,
 )
 from .throttles import (
     AuthIPRateThrottle,
@@ -62,17 +64,14 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         user = serializer.save()
-        refresh = RefreshToken.for_user(user)
-
-        response = Response(
+        return Response(
             {
                 "user": UserSerializer(user).data,
-                "access": str(refresh.access_token),
+                "verification_required": True,
+                "message": "Verify your email with OTP to activate this account. Set a password after verification if needed.",
             },
             status=status.HTTP_201_CREATED,
         )
-        set_refresh_cookie(response, str(refresh))
-        return response
 
 
 class ProfileView(generics.RetrieveUpdateAPIView):
@@ -216,6 +215,12 @@ class OTPVerifyView(generics.GenericAPIView):
         update_fields = []
 
         if not user.email_verified:
+            # Email ownership does not prove who selected a provisional password.
+            # Never retain credentials/sessions supplied before that proof.
+            if not is_privileged(user):
+                user.set_unusable_password()
+                user.auth_version += 1
+                update_fields.extend(["password", "auth_version"])
             user.email_verified = True
             user.email_verified_at = timezone.now()
             update_fields.extend(
@@ -238,7 +243,7 @@ class OTPVerifyView(generics.GenericAPIView):
                 "mfa_enrolled": bool(enrolled and enrolled.enabled),
             })
 
-        refresh = RefreshToken.for_user(user)
+        refresh = issue_user_tokens(user)
 
         response = Response(
             {
@@ -796,6 +801,7 @@ class EmailVerifyConfirmView(generics.GenericAPIView):
 
 class ThrottledTokenObtainPairView(TokenObtainPairView):
     throttle_classes = [AuthIPRateThrottle]
+    serializer_class = VerifiedTokenObtainPairSerializer
 
     def post(self, request, *args, **kwargs):
         email = str(request.data.get("email", "")).strip()
@@ -841,7 +847,7 @@ class CookieTokenRefreshView(generics.GenericAPIView):
         try:
             refresh = RefreshToken(raw_refresh_token)
             user = User.objects.all_with_deleted().filter(pk=refresh.get("user_id")).first()
-            if not user or not user.is_active or user.is_deleted or not privileged_token_valid(user, refresh):
+            if not user or not identity_token_valid(user, refresh) or not privileged_token_valid(user, refresh):
                 response = Response(
                     {"detail": "Session expired or additional verification is required."},
                     status=status.HTTP_401_UNAUTHORIZED,
