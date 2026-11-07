@@ -413,7 +413,7 @@ class OrderItem(models.Model):
     # Later checkout can reserve stock from a specific warehouse.
     warehouse = models.ForeignKey(
         Warehouse,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="order_items",
