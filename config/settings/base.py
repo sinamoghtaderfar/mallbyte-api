@@ -16,6 +16,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from config.openapi_settings import ENUM_NAME_OVERRIDES
+
 from .cache import build_cache_settings
 
 # Load environment variables
@@ -173,6 +175,7 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
+SPECTACULAR_SETTINGS = {"ENUM_NAME_OVERRIDES": ENUM_NAME_OVERRIDES}
 # Reate limit settings for throttling
 REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 
