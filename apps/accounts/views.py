@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
+from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import generics, permissions, serializers, status, viewsets
@@ -17,10 +19,11 @@ from apps.accounts.cookies import (
     set_refresh_cookie,
 )
 
-from .models import OTP, Address, Profile, Seller
 from .mfa import is_privileged, privileged_token_valid
 from .mfa_models import AdminMFAChallenge
+from .models import OTP, Address, Profile, Seller
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
+from .permissions import CanApproveSeller, CanDeleteUser, CanRejectSeller, IsAdminOrVendorManager
 from .serializers import (
     AddressSerializer,
     ChangePasswordSerializer,
@@ -318,7 +321,7 @@ class SellerStoreView(generics.RetrieveUpdateAPIView):
 class AdminSellersListView(generics.ListAPIView):
     """Admin: list all sellers with optional filters."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
@@ -341,7 +344,7 @@ class AdminSellersListView(generics.ListAPIView):
 class AdminSellerDetailView(generics.RetrieveAPIView):
     """Admin: view seller details."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
@@ -354,7 +357,7 @@ class AdminSellerDetailView(generics.RetrieveAPIView):
 class AdminPendingSellersView(generics.ListAPIView):
     """Admin: list pending seller applications."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
@@ -373,7 +376,7 @@ class AdminPendingSellersView(generics.ListAPIView):
 class AdminSellerVerifyView(generics.GenericAPIView):
     """Admin: approve a pending seller application."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanApproveSeller]
     serializer_class = SellerSerializer
 
     def post(self, request, pk):
@@ -396,7 +399,10 @@ class AdminSellerVerifyView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        seller.approve(request.user)
+        try:
+            seller.approve(request.user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
         seller.refresh_from_db()
 
         return Response(
@@ -413,10 +419,14 @@ class AdminSellerVerifyView(generics.GenericAPIView):
         )
 
 
+class SellerRejectionSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=2000, min_length=3, trim_whitespace=True)
+
+
 class AdminSellerRejectView(generics.GenericAPIView):
     """Admin: reject a pending seller application."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanRejectSeller]
     serializer_class = SellerSerializer
 
     def post(self, request, pk):
@@ -439,12 +449,12 @@ class AdminSellerRejectView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        reason = request.data.get("reason", "")
-
-        seller.reject(
-            admin_user=request.user,
-            reason=reason,
-        )
+        reason_serializer = SellerRejectionSerializer(data=request.data)
+        reason_serializer.is_valid(raise_exception=True)
+        try:
+            seller.reject(admin_user=request.user, reason=reason_serializer.validated_data["reason"])
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
         seller.refresh_from_db()
 
         return Response(
@@ -622,11 +632,12 @@ class DeleteAccountView(generics.GenericAPIView):
 class AdminDeleteUserView(generics.GenericAPIView):
     """Admin: delete a user account."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanDeleteUser]
 
+    @transaction.atomic
     def delete(self, request, user_id):
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.select_for_update().get(id=user_id)
 
         except User.DoesNotExist:
             return Response(
@@ -644,10 +655,10 @@ class AdminDeleteUserView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if user.is_superuser:
+        if user.is_superuser or (user.is_staff and not request.user.is_superuser):
             return Response(
                 {
-                    "error": "Cannot delete super admin accounts",
+                    "error": "Cannot delete protected accounts",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

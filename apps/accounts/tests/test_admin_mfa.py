@@ -1,13 +1,13 @@
 import time
 
-from django.test import override_settings
 from django.core.cache import cache
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.cookies import get_refresh_cookie_name
-from apps.accounts.mfa import _totp, decrypt_secret, new_secret
+from apps.accounts.mfa import _totp, decrypt_secret
 from apps.accounts.mfa_models import AdminMFADevice
 from apps.accounts.models import OTP, User
 
