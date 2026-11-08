@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -174,6 +175,7 @@ class ShipmentViewSet(
         serializer = self.get_serializer(eligible, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         """Create one shipment for the selected seller's part of a paid order.
 
@@ -198,6 +200,7 @@ class ShipmentViewSet(
         )
 
     @action(detail=True, methods=["post"], url_path="mark-ready")
+    @transaction.atomic
     def mark_ready(self, request, pk=None):
         if not self._can_manage_shipments(request.user):
             return self._management_required_response()
@@ -225,6 +228,7 @@ class ShipmentViewSet(
         )
 
     @action(detail=True, methods=["post"], url_path="mark-shipped")
+    @transaction.atomic
     def mark_shipped(self, request, pk=None):
         if not self._can_manage_shipments(request.user):
             return self._management_required_response()
@@ -254,6 +258,7 @@ class ShipmentViewSet(
         )
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")
+    @transaction.atomic
     def mark_delivered(self, request, pk=None):
         if not self._can_manage_shipments(request.user):
             return self._management_required_response()
@@ -281,6 +286,7 @@ class ShipmentViewSet(
         )
 
     @action(detail=True, methods=["post"], url_path="cancel")
+    @transaction.atomic
     def cancel(self, request, pk=None):
         if not self._can_manage_shipments(request.user):
             return self._management_required_response()
