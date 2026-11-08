@@ -30,19 +30,18 @@ if find_spec("apps.returns.private_media_views") is not None:
 
 
 if find_spec("apps.returns.customer_workflows") is not None:
-    from apps.returns.customer_workflows import EvidenceInput, TrackingInput
+    from apps.returns import customer_workflows
+    from apps.returns import serializers as return_serializers
 
-    from apps.returns.serializers import ReturnAttachmentSerializer, ReturnShipmentSerializer
-
-    class EvidenceUploadInput(EvidenceInput):
+    class EvidenceUploadInput(customer_workflows.EvidenceInput):
         file = EvidenceFileField()
 
     _document_view("apps.returns.customer_workflows.ReturnEvidenceUploadView", post=extend_schema(
-        request={"multipart/form-data": EvidenceUploadInput}, responses={201: ReturnAttachmentSerializer, 409: DetailErrorResponse},
+        request={"multipart/form-data": EvidenceUploadInput}, responses={201: return_serializers.ReturnAttachmentSerializer, 409: DetailErrorResponse},
         description="The return owner uploads private evidence, optionally linked to one of its own return items. Existing file-type/size validation applies.",
     ))
     _document_view("apps.returns.customer_workflows.CustomerReturnShipmentView", post=extend_schema(
-        request=TrackingInput, responses={200: ReturnShipmentSerializer, 409: DetailErrorResponse},
+        request=customer_workflows.TrackingInput, responses={200: return_serializers.ReturnShipmentSerializer, 409: DetailErrorResponse},
         description="Submit tracking after return approval. An identical replay is idempotent; changing already-submitted tracking requires support.",
     ))
 

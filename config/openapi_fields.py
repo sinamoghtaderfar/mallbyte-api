@@ -6,6 +6,7 @@ from rest_framework import serializers
 def _document_fields(target, factory):
     class Contract(OpenApiSerializerExtension):
         target_class = target
+        match_subclasses = True
 
         def map_serializer(self, auto_schema, direction):
             fields = {name: field for name, field in factory(self.target).items() if name in self.target.fields}
@@ -49,7 +50,7 @@ class ConsoleRoleOutput(serializers.Serializer):
     name = serializers.CharField()
 
 
-_document_fields("apps.analytics.serializers.AnalyticsGeneratedReportSerializer", lambda target: {"file_url": _text(nullable=True)})
+_document_fields("apps.analytics.serializers.AnalyticsGeneratedReportSerializer", lambda target: {"file_url": _text(nullable=True), "file": _text(nullable=True)})
 for _name in ("ContentPageSerializer", "BannerSerializer", "AnnouncementSerializer"):
     _document_fields(f"apps.content.serializers.{_name}", lambda target: {"is_visible": serializers.BooleanField(read_only=True)})
 

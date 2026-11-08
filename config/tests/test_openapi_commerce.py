@@ -86,7 +86,10 @@ class CommerceOpenAPIContractTests(SimpleTestCase):
         self.assertEqual(operation["security"], [{"jwtAuth": []}])
         request = self.component(operation["requestBody"]["content"]["application/json"]["schema"]["$ref"])
         self.assertEqual(set(request["required"]), {"warehouse", "quantity", "idempotency_key", "sellable_confirmed"})
-        self.assertEqual(request["properties"]["sellable_confirmed"], {"type": "boolean", "enum": [True]})
+        confirmation = request["properties"]["sellable_confirmed"]
+        if "$ref" in confirmation:
+            confirmation = self.component(confirmation["$ref"])
+        self.assertEqual(confirmation, {"type": "boolean", "enum": [True]})
         for status in ("200", "201"):
             result = self.component(operation["responses"][status]["content"]["application/json"]["schema"]["$ref"])
             self.assertEqual(result["properties"]["replayed"]["type"], "boolean")
