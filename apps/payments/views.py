@@ -17,6 +17,7 @@ from apps.payments.serializers import (
     PaymentSuccessSerializer,
 )
 from apps.payments.services import create_payment_notification
+from apps.rbac.commerce import can_manage, can_view_all
 
 
 class PaymentViewSet(
@@ -50,13 +51,14 @@ class PaymentViewSet(
     def get_queryset(self):
         """
         Normal users can see only their own payments.
-        Staff and superusers can see all payments.
+        Explicit commerce readers/managers can see all payments.
         """
 
         user = self.request.user
         queryset = super().get_queryset()
 
-        if user.is_staff or user.is_superuser:
+        allowed = can_manage(user, "payments") if self.action in {"mark_success", "mark_failed", "cancel"} else can_view_all(user, "payments")
+        if allowed:
             return queryset
 
         return queryset.filter(user=user)
@@ -102,7 +104,7 @@ class PaymentViewSet(
 
         payment = serializer.save()
 
-        response_serializer = PaymentDetailSerializer(payment)
+        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-success")
@@ -163,7 +165,7 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment)
+        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="mark-failed")
@@ -218,7 +220,7 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment)
+        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cancel")
@@ -266,5 +268,5 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment)
+        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_200_OK)
