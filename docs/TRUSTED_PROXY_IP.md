@@ -25,3 +25,9 @@ clients and a forged-header negative case on staging before promotion.
 Deploy the outer proxy, internal gateway and Django configuration together.
 If a CDN precedes the TLS terminator, configure its own trusted real-IP handling
 first, so $remote_addr is a verified client address.
+
+Administrative audit logs now use the same canonical trusted-peer address policy
+as authentication throttles. Untrusted or chained X-Forwarded-For values cannot
+forge an audit client IP. A missing/invalid peer address is stored as NULL in the
+audit's nullable IP column; it is never persisted as the throttle's "unknown"
+marker.

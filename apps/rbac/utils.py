@@ -143,13 +143,12 @@ def sync_user_permissions(user):
 
 
 def get_client_ip(request):
-    """Get client IP from request."""
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    """Use the same trusted-peer address policy as authentication throttles."""
+    from apps.accounts.client_ip import client_ip
 
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-
-    return request.META.get("REMOTE_ADDR")
+    address = client_ip(request)
+    # Throttles use a stable unknown bucket; audit IP columns are nullable IPs.
+    return None if address == "unknown" else address
 
 
 def log_admin_action(
