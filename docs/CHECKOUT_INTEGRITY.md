@@ -29,6 +29,11 @@ Apply the order migrations before deploying the API and workers.
   worker/Beat availability and tune the batch/schedule to backlog size. Payment
   creation and capture refuse an expired hold even before the cleanup job runs.
   Order detail responses expose `reservation_expires_at` for the client countdown.
+- If evidence of an actual money capture arrives after the reservation expired,
+  do not retry capture against the released stock or silently recreate the order.
+  The capture guard rejects the expired hold to prevent overselling. An operator
+  must reconcile the recorded transfer and arrange a refund or a separately
+  authorized new order; expiry itself does not reverse a real money transfer.
 - Historical orders with a NULL reservation deadline are intentionally left
   untouched: an operator must review and explicitly cancel stale unpaid orders
   rather than infer which stock is reserved from legacy data.
