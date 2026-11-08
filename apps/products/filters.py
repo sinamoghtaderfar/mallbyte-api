@@ -1,7 +1,9 @@
 # apps/products/filters.py
 
-from django.db.models import F, Q
+from django.db.models import Exists, F, OuterRef, Q
 from django_filters import rest_framework as filters
+
+from apps.inventory.models import Stock
 
 from .models import Brand, Category, Product
 
@@ -38,16 +40,12 @@ class ProductFilter(filters.FilterSet):
         return queryset.filter(labels__contains=[value])
 
     def filter_in_stock(self, queryset, name, value):
-        if value:
-            return queryset.filter(
-                stock_items__quantity__gt=F("stock_items__reserved_quantity")
-            ).distinct()
-
-        return queryset
+        available = Stock.objects.filter(product_id=OuterRef("pk"), quantity__gt=F("reserved_quantity"))
+        return queryset.annotate(_filter_in_stock=Exists(available)).filter(_filter_in_stock=value)
 
     def filter_has_discount(self, queryset, name, value):
         if value:
-            return queryset.filter(compare_price__isnull=False)
+            return queryset.filter(compare_price__gt=F("price"))
 
         return queryset
 
