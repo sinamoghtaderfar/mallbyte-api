@@ -89,7 +89,7 @@ class CartSerializer(serializers.ModelSerializer):
         return str(sum((item.total_price for item in obj.items.all()), Decimal("0")))
 
     def to_representation(self, instance):
-        available = Stock.objects.filter(product_id=OuterRef("product_id")).order_by().values("product_id").annotate(
+        available = Stock.objects.filter(product_id=OuterRef("product_id"), warehouse__is_active=True).order_by().values("product_id").annotate(
             value=Sum(F("quantity") - F("reserved_quantity")),
         ).values("value")
         items = CartItem.objects.select_related("product").annotate(
