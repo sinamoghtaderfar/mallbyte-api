@@ -1,9 +1,15 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
+
 from apps.content.views import (
-    AnnouncementViewSet, BannerViewSet, ContentPageViewSet,
-    FAQCategoryViewSet, FAQItemViewSet, HomepageContentView,
-    NavigationItemViewSet, NavigationMenuViewSet,
+    AnnouncementViewSet,
+    BannerViewSet,
+    ContentPageViewSet,
+    FAQCategoryViewSet,
+    FAQItemViewSet,
+    HomepageContentView,
+    NavigationItemViewSet,
+    NavigationMenuViewSet,
 )
 
 router = DefaultRouter()

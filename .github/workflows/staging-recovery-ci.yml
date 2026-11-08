@@ -2,7 +2,6 @@ name: Staging and recovery scaffold validation
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 

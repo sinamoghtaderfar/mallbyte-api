@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install ruff==0.15.5
-      - name: Lint remediated observability and configuration
-        run: ruff check apps/observability config
+      - name: Lint remediated content, observability and configuration
+        run: ruff check apps/content apps/observability config
       - name: Parse backend Python sources
         run: python -m compileall -q apps config deploy ops

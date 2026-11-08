@@ -1,9 +1,9 @@
+from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import serializers
 
-from apps.analytics.permissions import CanViewSellerAnalytics, CanViewPlatformAnalytics
+from apps.analytics.permissions import CanViewPlatformAnalytics, CanViewSellerAnalytics
 from apps.settlements.readiness import financial_readiness
 from apps.settlements.settlement_policy import payout_eligibility
 

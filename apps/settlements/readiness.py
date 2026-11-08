@@ -1,9 +1,9 @@
 """Non-mutating financial migration/readiness checks for operators."""
-from django.db.models import Count, F, OuterRef, Exists
+from django.db.models import Exists, OuterRef
 
 from apps.orders.models import Order, OrderItem
 from apps.payments.models import Payment
-from apps.settlements.models import ItemAllocation, SellerLedgerEntry
+from apps.settlements.models import SellerLedgerEntry
 
 
 def financial_readiness():

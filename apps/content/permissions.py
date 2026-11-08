@@ -1,5 +1,6 @@
 """CMS permissions: role-based editorial workflow, independent of Django staff."""
 from rest_framework.permissions import BasePermission
+
 from apps.rbac.utils import has_permission
 
 VIEW = "view_content_drafts"

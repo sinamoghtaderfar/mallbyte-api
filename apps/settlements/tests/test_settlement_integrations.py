@@ -17,7 +17,7 @@ from apps.orders.models import Cart, CartItem, Order, SellerOrderFulfillment
 from apps.payments.models import Payment
 from apps.products.models import Category, Product
 from apps.returns.models import ReturnItem, ReturnRequest
-from apps.settlements.models import ItemAllocation, ConfirmedPayout, ConfirmedRefund, SellerLedgerEntry
+from apps.settlements.models import ConfirmedPayout, ConfirmedRefund, ItemAllocation, SellerLedgerEntry
 from apps.settlements.services import seller_balance
 from apps.settlements.settlement_policy import payout_eligibility
 
