@@ -1,3 +1,4 @@
+from django.urls import reverse
 from rest_framework import serializers
 
 from apps.orders.models import Order, OrderItem
@@ -102,6 +103,12 @@ class ReturnItemSerializer(serializers.ModelSerializer):
 
 class ReturnAttachmentSerializer(serializers.ModelSerializer):
     uploaded_by = serializers.StringRelatedField(read_only=True)
+    file = serializers.SerializerMethodField()
+
+    def get_file(self, obj):
+        url = reverse("return-attachment-download", kwargs={"pk": obj.pk})
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
 
     class Meta:
         model = ReturnAttachment
@@ -123,6 +130,15 @@ class ReturnAttachmentSerializer(serializers.ModelSerializer):
 
 
 class ReturnShipmentSerializer(serializers.ModelSerializer):
+    shipping_label = serializers.SerializerMethodField()
+
+    def get_shipping_label(self, obj):
+        if not obj.shipping_label:
+            return None
+        url = reverse("return-shipping-label-download", kwargs={"pk": obj.pk})
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
     class Meta:
         model = ReturnShipment
         fields = [
@@ -321,6 +337,9 @@ class SellerReturnItemSerializer(PublicReturnItemSerializer):
 
 
 class SellerReturnAttachmentSerializer(serializers.ModelSerializer):
+    file = serializers.SerializerMethodField(method_name="get_file")
+    get_file = ReturnAttachmentSerializer.get_file
+
     class Meta:
         model = ReturnAttachment
         fields = [

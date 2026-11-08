@@ -6,6 +6,8 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.support.storage import PrivateMediaStorage
+
 
 def return_file_upload_path(instance, filename):
     request_number = "pending"
@@ -303,7 +305,7 @@ class ReturnAttachment(TimeStampedModel):
         default=AttachmentType.OTHER,
     )
 
-    file = models.FileField(upload_to=return_file_upload_path)
+    file = models.FileField(upload_to=return_file_upload_path, storage=PrivateMediaStorage())
     caption = models.CharField(max_length=255, blank=True)
 
     class Meta:
@@ -326,6 +328,7 @@ class ReturnShipment(TimeStampedModel):
 
     shipping_label = models.FileField(
         upload_to=return_file_upload_path,
+        storage=PrivateMediaStorage(),
         blank=True,
         null=True,
     )
