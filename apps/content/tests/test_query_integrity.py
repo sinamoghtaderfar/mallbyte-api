@@ -10,10 +10,10 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import User
 from apps.content.models import ContentPage, FAQCategory, FAQItem, NavigationItem, NavigationMenu
-from apps.content.permissions import ContentPermission
+from apps.content.permissions import EDIT, PUBLISH, VIEW, ContentPermission
 from apps.content.serializers import FAQCategorySerializer
-from apps.rbac.models import Role
-from apps.rbac.utils import assign_role, clear_user_permissions_cache
+from apps.rbac.models import Permission, Role, RolePermission
+from apps.rbac.utils import assign_role, clear_user_permissions_cache, has_permission
 
 
 class CMSQueryIntegrityTests(APITestCase):
@@ -122,8 +122,18 @@ class CMSQueryIntegrityTests(APITestCase):
 class CMSPublicationConcurrencyTests(TransactionTestCase):
     def test_editor_permission_is_checked_after_concurrent_publication_commits(self):
         editor = User.objects.create_user(email="cms-concurrent-editor@example.com")
-        assign_role(editor, Role.objects.get(name="content_editor"))
+        # TransactionTestCase flushes migration-created role rows. Build only
+        # the editor capabilities this race needs, independent of test order.
+        role = Role.objects.create(name="cms-publication-race-editor", level=50)
+        for codename in (VIEW, EDIT):
+            permission, _ = Permission.objects.get_or_create(
+                codename=codename, defaults={"name": codename, "module": "content"},
+            )
+            RolePermission.objects.create(role=role, permission=permission)
+        assign_role(editor, role)
         clear_user_permissions_cache(editor)
+        self.assertTrue(has_permission(editor, EDIT))
+        self.assertFalse(has_permission(editor, PUBLISH))
         page = ContentPage.objects.create(title="Concurrent publication", slug="concurrent-publication", content="Approved content")
         published = threading.Event()
         release = threading.Event()
