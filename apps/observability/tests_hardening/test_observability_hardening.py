@@ -11,13 +11,19 @@ from rest_framework.test import APITestCase
 from apps.accounts.models import User
 from apps.observability.middleware import RequestLogMiddleware
 from apps.observability.models import (
-    AuditLog, ErrorLog, HealthStatusChoices, ObservabilityAlert, RequestLog,
+    AuditLog,
+    ErrorLog,
+    HealthStatusChoices,
+    ObservabilityAlert,
+    RequestLog,
     SystemHealthSnapshot,
 )
 from apps.observability.sanitization import scrub_query, scrub_text
 from apps.observability.services import (
-    cleanup_old_observability_logs, create_or_update_alert,
-    evaluate_observability_alert_rules, get_client_ip,
+    cleanup_old_observability_logs,
+    create_or_update_alert,
+    evaluate_observability_alert_rules,
+    get_client_ip,
 )
 from apps.rbac.models import Role
 from apps.rbac.utils import assign_role
@@ -127,8 +133,8 @@ class ObservabilityHardeningTests(APITestCase):
         self.assertTrue(res["X-Request-ID"])
 
     def test_acknowledged_alert_reused_then_recovered(self):
-        data = dict(alert_type="redis", severity="error", title="down", message="Redis down",
-                    source="redis", fingerprint="redis:unhealthy")
+        data = {"alert_type": "redis", "severity": "error", "title": "down", "message": "Redis down",
+                "source": "redis", "fingerprint": "redis:unhealthy"}
         alert = create_or_update_alert(**data)
         alert.acknowledge(user=self.operator)
         same = create_or_update_alert(**data)

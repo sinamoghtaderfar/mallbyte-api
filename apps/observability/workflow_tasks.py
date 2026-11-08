@@ -2,6 +2,7 @@
 from celery import shared_task
 from django.conf import settings
 from django.db import transaction
+
 from apps.observability.ai_diagnosis import AIUnavailable, ask_ai_diagnosis
 from apps.observability.workflow_models import AIDiagnosis
 

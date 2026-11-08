@@ -3,9 +3,11 @@ import json
 import logging
 import os
 import re
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
+
 from django.conf import settings
+
 from apps.observability.sanitization import scrub_text
 
 OPENAI_RESPONSES_URL = os.getenv("OBSERVABILITY_AI_RESPONSES_URL", "https://api.openai.com/v1/responses")

@@ -521,4 +521,4 @@ class CeleryTaskLog(models.Model):
         return f"{self.task_name} - {self.status}"
 
 # Register incident and control-plane models with the Observability app.
-from .workflow_models import Incident, IncidentEvent, AIDiagnosis, InfrastructureOperation  # noqa: E402,F401
+from .workflow_models import AIDiagnosis, Incident, IncidentEvent, InfrastructureOperation  # noqa: E402,F401

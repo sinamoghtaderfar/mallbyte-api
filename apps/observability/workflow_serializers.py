@@ -1,11 +1,15 @@
 """Publicly returned workflow fields deliberately omit sensitive log payloads."""
 from django.conf import settings
 from rest_framework import serializers
-from apps.observability.models import RequestLog, ErrorLog, CeleryTaskLog
-from apps.observability.workflow_models import (
-    Incident, IncidentEvent, AIDiagnosis, InfrastructureOperation,
-)
+
+from apps.observability.models import CeleryTaskLog, ErrorLog, RequestLog
 from apps.observability.sanitization import scrub_text
+from apps.observability.workflow_models import (
+    AIDiagnosis,
+    Incident,
+    IncidentEvent,
+    InfrastructureOperation,
+)
 
 
 class RequestSummarySerializer(serializers.ModelSerializer):
