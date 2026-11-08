@@ -36,7 +36,12 @@ and scripts for PostgreSQL custom-format backups with integrity checks and
 
 ## Backup
 
-Install PostgreSQL client tools on the operator host. Export dedicated
+Install PostgreSQL client tools with the same major version as the database on
+the operator host (PostgreSQL 16 for the supplied stack). Both scripts check
+the server and pg_dump/pg_restore major versions before operating. A newer
+client can emit settings such as transaction_timeout that an older server
+cannot restore; a successful dump alone does not prove compatibility.
+Export dedicated
 credentials from a secrets manager without shell history; use a secure,
 unshared directory and an encrypted off-site vault.
 
