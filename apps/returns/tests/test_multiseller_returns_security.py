@@ -9,8 +9,11 @@ from rest_framework.test import APITestCase
 from apps.orders.models import Order, OrderItem, SellerOrderFulfillment
 from apps.products.models import Category, Product
 from apps.returns.models import (
-    ReturnAttachment, ReturnItem, ReturnRequest, ReturnStatusHistory,
+    ReturnAttachment,
+    ReturnItem,
+    ReturnRequest,
     ReturnShipment,
+    ReturnStatusHistory,
 )
 from apps.returns.services import approve_return_request
 
