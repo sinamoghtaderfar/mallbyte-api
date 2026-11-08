@@ -239,15 +239,52 @@ class Address(models.Model):
         verbose_name = "Address"
         verbose_name_plural = "Addresses"
         ordering = ["-is_default", "-created_at"]
+        constraints = [models.UniqueConstraint(fields=["user"], condition=models.Q(is_default=True), name="accounts_one_default_address_per_user")]
 
     def __str__(self):
         return f"{self.title}: {self.city}, {self.street}"
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        loaded = dict(zip(field_names, values, strict=True))
+        instance._address_loaded = {name: loaded[name] for name in ("is_default", "user_id") if name in loaded}
+        return instance
+
     def save(self, *args, **kwargs):
-        # If this address is set as default, unset other default addresses for this user
-        if self.is_default:
-            Address.objects.filter(user=self.user, is_default=True).update(is_default=False)
-        super().save(*args, **kwargs)
+        update_fields = kwargs.get("update_fields")
+        loaded = getattr(self, "_address_loaded", {})
+        adding = self._state.adding
+        if not adding and update_fields is None:
+            # A metadata save from an old instance must not reinstate an old
+            # default or owner. Explicit changes and update_fields remain valid.
+            update_fields = {
+                field.name for field in self._meta.concrete_fields
+                if not field.primary_key and field.attname not in self.get_deferred_fields()
+                and (field.attname not in {"is_default", "user_id"}
+                     or loaded.get(field.attname) != getattr(self, field.attname))
+            }
+            kwargs["update_fields"] = update_fields
+        default_written = update_fields is None or "is_default" in update_fields
+        user_written = update_fields is None or "user" in update_fields or "user_id" in update_fields
+        using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            if default_written and self.is_default:
+                owner_ids = {self.user_id}
+                if loaded.get("user_id") is not None:
+                    owner_ids.add(loaded["user_id"])
+                # Serialize first/default promotions even when no default exists.
+                list(User.objects.all_with_deleted().using(using).select_for_update(no_key=True).filter(pk__in=owner_ids).order_by("pk"))
+                type(self).objects.using(using).filter(user_id=self.user_id, is_default=True).exclude(pk=self.pk).update(is_default=False)
+            super().save(*args, **kwargs)
+            refresh_fields = []
+            if not default_written:
+                refresh_fields.append("is_default")
+            if not user_written:
+                refresh_fields.append("user")
+            if refresh_fields:
+                self.refresh_from_db(using=using, fields=refresh_fields)
+        self._address_loaded = {"is_default": self.is_default, "user_id": self.user_id}
 
 
 class OTP(models.Model):

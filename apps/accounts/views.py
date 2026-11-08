@@ -19,10 +19,10 @@ from apps.accounts.cookies import (
     set_refresh_cookie,
 )
 
-from .models import OTP, Address, Profile, Seller
 from .auth_tokens import identity_token_valid, issue_user_tokens
 from .mfa import is_privileged, privileged_token_valid
 from .mfa_models import AdminMFAChallenge
+from .models import OTP, Address, Profile, Seller
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
 from .serializers import (
     AddressSerializer,
@@ -102,13 +102,6 @@ class AddressViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["patch"])
     def set_default(self, request, pk=None):
         address = self.get_object()
-
-        Address.objects.filter(
-            user=request.user,
-            is_default=True,
-        ).update(
-            is_default=False,
-        )
 
         address.is_default = True
         address.save(update_fields=["is_default"])
