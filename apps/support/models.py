@@ -2,7 +2,6 @@ import os
 import uuid
 
 from django.conf import settings
-from apps.support.storage import SupportAttachmentStorage
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -10,6 +9,7 @@ from django.utils.text import slugify
 from apps.orders.models import Order
 from apps.products.models import Product
 from apps.returns.models import ReturnRequest
+from apps.support.storage import SupportAttachmentStorage
 
 
 class SupportTag(models.Model):

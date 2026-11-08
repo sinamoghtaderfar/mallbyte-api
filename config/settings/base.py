@@ -325,6 +325,7 @@ AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
 
 # Required for the Next.js frontend to send refresh cookies
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
+CORS_EXPOSE_HEADERS = ["Link", "X-Total-Count"]
 
 # Incident workflows: AI enabled automatically with an explicitly configured key.
 # OBSERVABILITY_AI_ENABLED=false acts as a global emergency kill switch.
