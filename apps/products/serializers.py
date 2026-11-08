@@ -144,8 +144,6 @@ class ProductListSerializer(serializers.ModelSerializer):
         return obj._catalog_reserved if hasattr(obj, "_catalog_reserved") else obj.reserved_stock
 
     def get_available_stock(self, obj):
-        if hasattr(obj, "_catalog_stock") and hasattr(obj, "_catalog_reserved"):
-            return obj._catalog_stock - obj._catalog_reserved
         return obj.available_stock
 
     def get_label_display(self, obj):
