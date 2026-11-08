@@ -26,3 +26,15 @@ activation changes also invalidate both access and refresh JWTs. After changing
 a password, the frontend must clear the old session and sign in again. This
 includes passwords changed through Django admin. Role permissions are checked
 separately on each request and have their own cache invalidation.
+
+Apply `accounts.0017_identity_constraints` next. It checks normalized email
+duplicates before changing data and stops for manual identity resolution if any
+exist. It normalizes the remaining email identities and invalidates outstanding
+short-lived OTPs; users must request a new code during rollout. The database
+enforces case-insensitive account email uniqueness and one unused OTP per email.
+
+Email changes keep the current login email until the new address is proved.
+Verification tokens are hashed, bound to the destination and security version,
+and expire after one hour. Confirmation invalidates the old JWT session, so the
+frontend must sign in using the confirmed new address. Password reset requests
+return the same accepted response for unknown, inactive and available accounts.
