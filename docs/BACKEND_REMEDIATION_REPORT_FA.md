@@ -143,7 +143,8 @@ PR48 صرفاً عملیات صریح اپراتور دارای `restock_returns
 
 ۸ تست آفلاین ops نیز موفق‌اند (`ops.tests.test_postgres_client_check` و `deploy.observability_ops.test_host_runner`). علاوه بر آن:
 
-- Ruff کل کاندیدا و parse کردن ۴۶۴ فایل Python موفق؛ migration drift در `makemigrations --check --dry-run` مشاهده نشد.
+- Ruff کل کاندیدا و parse کردن ۴۷۵ فایل Python موفق؛ migration drift در `makemigrations --check --dry-run` مشاهده نشد.
+- یک smoke مستقل PostgreSQL نیز زنجیرهٔ واقعی `post_verified_refund → Shipment.cancel` را روی DB موقت اجرا کرد: وضعیت Payment/Order همچنان refunded ماند و تنها یک رخداد لغو ثبت شد. این اجرای موقت به شمار ۱۰۳۰ تست repository افزوده نشده است.
 - Redis واقعی و Celery worker واقعی برای queued delivery پیش از startup، JSON transport و retry اجرا شد؛ task انقضای سفارش واقعاً موجودی را یک‌بار آزاد و Payment/Order را cancel کرد؛ daily audit در replay دوباره ثبت نشد. این آزمون eager نبود.
 - backup/restore واقعی در سرویس disposable PostgreSQL16، با client16 و checksum، دادهٔ marker را بازگرداند. ناسازگاری client18 با server16 شناسایی و guard نسخه آزموده شد.
 - `nginx -t` و `docker compose ... config --quiet` برای production/staging با env ساختگی و مجزا موفق؛ هیچ سرویس واقعی deploy نشد.
