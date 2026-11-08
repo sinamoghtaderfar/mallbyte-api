@@ -174,6 +174,11 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 # Reate limit settings for throttling
+AUTH_TRUSTED_PROXY_NETWORKS = [
+    network.strip()
+    for network in os.getenv("AUTH_TRUSTED_PROXY_NETWORKS", "").split(",")
+    if network.strip()
+]
 REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
