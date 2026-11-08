@@ -39,7 +39,6 @@ class PrivateFinancialReportTests(APITestCase):
                     self.assertEqual(response["Cache-Control"], "private, no-store")
                     self.assertEqual(response["X-Content-Type-Options"], "nosniff")
                     self.assertIn(b"private@example.com", b"".join(response.streaming_content))
-                response.close()
 
     def test_legacy_migration_is_dry_by_default_and_verifies_content_before_purge(self):
         with tempfile.TemporaryDirectory() as public, tempfile.TemporaryDirectory() as private:

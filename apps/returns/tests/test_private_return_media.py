@@ -38,7 +38,6 @@ class PrivateReturnMediaTests(APITestCase):
                             self.assertEqual(b"".join(response.streaming_content), b"private evidence")
                             self.assertEqual(response["Cache-Control"], "private, no-store")
                             self.assertEqual(response["X-Content-Type-Options"], "nosniff")
-                        response.close()
             self.client.force_authenticate(user=None)
             self.assertEqual(self.client.get(reverse("return-attachment-download", args=[own.pk])).status_code, 401)
 
@@ -57,7 +56,8 @@ class PrivateReturnMediaTests(APITestCase):
                 self.client.force_authenticate(user=user)
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, expected)
-                response.close()
+                if expected == 200:
+                    self.assertEqual(b"".join(response.streaming_content), b"%PDF-private")
 
     def test_plain_staff_cannot_download_another_customers_evidence(self):
         self.other_buyer.is_staff = True
