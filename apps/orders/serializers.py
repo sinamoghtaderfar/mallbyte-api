@@ -17,6 +17,7 @@ from apps.orders.models import (
 )
 from apps.orders.services import create_order_notification
 from apps.products.models import Product
+from apps.rbac.commerce import can_view_all
 
 # ============================================================
 # Cart Item Serializer
@@ -287,6 +288,14 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     """
     Full order details with items and status history.
     """
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request is None or not can_view_all(request.user, "orders"):
+            fields.pop("admin_note", None)
+        return fields
+
 
     items = OrderItemSerializer(many=True, read_only=True)
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
