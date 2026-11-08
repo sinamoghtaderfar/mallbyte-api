@@ -1,19 +1,22 @@
 from django.contrib.auth import get_user_model
-from rest_framework import generics, serializers, status, viewsets
+from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import AdminLog, Permission, Role, RolePermission, UserRole
 from .permissions import IsSuperAdmin
 from .serializers import (
+    AdminLogFilterSerializer,
     AdminLogSerializer,
     AssignRoleSerializer,
     BulkAssignRoleSerializer,
     CheckPermissionSerializer,
     PermissionSerializer,
+    RolePermissionIdSerializer,
     RolePermissionSerializer,
     RoleSerializer,
     UserPermissionsSerializer,
+    UserRoleFilterSerializer,
     UserRoleSerializer,
 )
 from .utils import (
@@ -26,10 +29,6 @@ from .utils import (
 )
 
 User = get_user_model()
-
-
-class RolePermissionIdSerializer(serializers.Serializer):
-    permission_id = serializers.IntegerField(min_value=1)
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -205,19 +204,9 @@ class UserRoleViewSet(viewsets.ModelViewSet):
             "assigned_by",
         ).order_by("-assigned_at", "-pk")
 
-        user_id = self.request.query_params.get("user_id")
-        if user_id:
-            queryset = queryset.filter(user_id=user_id)
-
-        role_id = self.request.query_params.get("role_id")
-        if role_id:
-            queryset = queryset.filter(role_id=role_id)
-
-        is_active = self.request.query_params.get("is_active")
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == "true")
-
-        return queryset
+        filters = UserRoleFilterSerializer(data=self.request.query_params)
+        filters.is_valid(raise_exception=True)
+        return queryset.filter(**filters.validated_data)
 
 
 class AssignRoleView(generics.GenericAPIView):
@@ -387,19 +376,12 @@ class AdminLogListView(generics.ListAPIView):
             "target_role",
         ).all()
 
-        admin_id = self.request.query_params.get("admin_id")
-        if admin_id:
-            queryset = queryset.filter(admin_id=admin_id)
-
-        target_user_id = self.request.query_params.get("target_user")
-        if target_user_id:
-            queryset = queryset.filter(target_user_id=target_user_id)
-
-        action_value = self.request.query_params.get("action")
-        if action_value:
-            queryset = queryset.filter(action=action_value)
-
-        return queryset
+        filters = AdminLogFilterSerializer(data=self.request.query_params)
+        filters.is_valid(raise_exception=True)
+        values = dict(filters.validated_data)
+        if "target_user" in values:
+            values["target_user_id"] = values.pop("target_user")
+        return queryset.filter(**values)
 
 
 class AdminLogDetailView(generics.RetrieveAPIView):
