@@ -435,7 +435,6 @@ def mark_return_refunded(*, return_request, user, note=""):
     from django.conf import settings
     if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
         from django.db.models import Sum
-
         from apps.settlements.models import ConfirmedRefund
         verified = ConfirmedRefund.objects.filter(
             return_request_id=return_request.pk,
