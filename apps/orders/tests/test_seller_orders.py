@@ -253,6 +253,7 @@ class SellerOrderAPITests(APITestCase):
 
     def test_historical_paid_orders_backfill_missing_seller_rows(self):
         from importlib import import_module
+
         from django.apps import apps as django_apps
 
         order = self.create_order()

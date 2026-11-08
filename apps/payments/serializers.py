@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.orders.models import Order
@@ -195,6 +196,9 @@ class PaymentCreateSerializer(serializers.Serializer):
 
         if order.total_amount <= 0:
             raise serializers.ValidationError("Order total must be greater than zero.")
+
+        if order.reservation_expires_at and order.reservation_expires_at <= timezone.now():
+            raise serializers.ValidationError("The order stock reservation has expired. Please check out again.")
 
         return order
 

@@ -198,9 +198,12 @@ class Payment(models.Model):
             if payment.amount != order.total_amount:
                 raise ValidationError("Payment amount does not match the order total.")
 
+            if order.reservation_expires_at and order.reservation_expires_at <= timezone.now():
+                raise ValidationError("The order stock reservation has expired. Please check out again.")
+
             old_order_status = order.status
 
-            for item in order.items.select_related("product", "warehouse"):
+            for item in order.items.select_related("product", "warehouse").order_by("product_id", "warehouse_id", "pk"):
                 if not item.warehouse_id:
                     raise ValidationError("The order item has no assigned warehouse.")
 
