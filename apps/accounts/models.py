@@ -3,7 +3,8 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models
+from django.db import models, router, transaction
+from django.db.models import F
 from django.utils import timezone
 
 
@@ -60,6 +61,7 @@ class User(AbstractUser):
 
     # Remove the default username field
     username = None
+    _SECURITY_FIELDS = frozenset({"password", "email", "email_verified", "is_active", "is_deleted", "is_staff", "is_superuser"})
 
     phone = models.CharField(
     max_length=15,
@@ -119,6 +121,55 @@ class User(AbstractUser):
     # String representation of the user
     def __str__(self):
         return f"{self.full_name} - {self.email}"
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_security_state = {name: value for name, value in zip(field_names, values, strict=True) if name in cls._SECURITY_FIELDS}
+        return instance
+
+    def refresh_from_db(self, *args, **kwargs):
+        super().refresh_from_db(*args, **kwargs)
+        self._loaded_security_state = {field: getattr(self, field) for field in self._SECURITY_FIELDS if field not in self.get_deferred_fields()}
+
+    def save(self, *args, **kwargs):
+        """Invalidate sessions for security changes, including Django admin saves."""
+        security_fields = self._SECURITY_FIELDS
+        update_fields = kwargs.get("update_fields")
+        if self._state.adding:
+            result = super().save(*args, **kwargs)
+            self._loaded_security_state = {field: getattr(self, field) for field in security_fields if field not in self.get_deferred_fields()}
+            return result
+        if update_fields is not None and not security_fields.intersection(update_fields):
+            return super().save(*args, **kwargs)
+        database = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=database):
+            previous = type(self)._base_manager.using(database).select_for_update().filter(pk=self.pk).values(*security_fields, "auth_version").first()
+            if previous is not None:
+                relevant = security_fields if update_fields is None else security_fields.intersection(update_fields)
+                loaded = getattr(self, "_loaded_security_state", {})
+                changed = False
+                for field in relevant:
+                    # A full save of stale profile data must not undo a newer
+                    # password/identity change made through another instance.
+                    explicitly_changed = field in loaded and getattr(self, field) != loaded[field]
+                    if field not in loaded and update_fields is not None and field not in self.get_deferred_fields():
+                        explicitly_changed = True
+                    if explicitly_changed:
+                        changed = changed or previous[field] != getattr(self, field)
+                    else:
+                        setattr(self, field, previous[field])
+                self.auth_version = previous["auth_version"] + int(changed)
+                if changed and update_fields is not None:
+                    kwargs["update_fields"] = set(update_fields) | {"auth_version"}
+            result = super().save(*args, **kwargs)
+            self._loaded_security_state = {field: getattr(self, field) for field in security_fields if field not in self.get_deferred_fields()}
+            return result
+
+    def invalidate_sessions(self):
+        """Atomically revoke all access and refresh sessions for this account."""
+        type(self)._base_manager.filter(pk=self.pk).update(auth_version=F("auth_version") + 1)
+        self.refresh_from_db(fields=["auth_version"])
 
 
 class Profile(models.Model):

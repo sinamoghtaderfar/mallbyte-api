@@ -19,3 +19,10 @@ Data created by legacy provisional accounts is retained; review any suspicious
 legacy business records separately. A formerly verified account with a
 compromised password still requires normal recovery; verification provenance
 cannot be reconstructed from historic records.
+
+Logout revokes all sessions for the account identified by a valid refresh cookie
+or Bearer access token. Password reset/change and saved identity, privilege or
+activation changes also invalidate both access and refresh JWTs. After changing
+a password, the frontend must clear the old session and sign in again. This
+includes passwords changed through Django admin. Role permissions are checked
+separately on each request and have their own cache invalidation.
