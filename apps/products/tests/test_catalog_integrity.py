@@ -102,6 +102,15 @@ class CatalogIntegrityTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertLessEqual(len(queries), 4)
 
+    def test_category_parent_filter_rejects_invalid_ids(self):
+        for parent in ("invalid", "1.5", "-1", str(2 ** 63)):
+            response = self.client.get(reverse("category-list"), {"parent": parent})
+            self.assertEqual(response.status_code, 400, parent)
+            self.assertIn("parent", response.data)
+        response = self.client.get(reverse("category-list"), {"parent": "null"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+
     def test_category_tree_queries_do_not_grow_with_descendant_count(self):
         for index in range(3):
             child = Category.objects.create(name=f"Child {index}", slug=f"tree-child-{index}", parent=self.category)

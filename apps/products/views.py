@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from openpyxl import Workbook
-from rest_framework import filters, generics, status, viewsets
+from rest_framework import filters, generics, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -89,7 +89,12 @@ class CategoryViewSet(viewsets.ModelViewSet):
         if parent == "null" or parent is None:
             queryset = queryset.filter(parent__isnull=True)
         elif parent:
-            queryset = queryset.filter(parent_id=parent)
+            field = serializers.IntegerField(min_value=1, max_value=2 ** 63 - 1)
+            try:
+                parent_id = field.run_validation(parent)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"parent": exc.detail}) from exc
+            queryset = queryset.filter(parent_id=parent_id)
         return queryset
 
 
