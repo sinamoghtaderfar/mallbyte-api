@@ -2,7 +2,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import generics, permissions, serializers, status, viewsets
@@ -262,14 +262,27 @@ class SellerApplyView(generics.CreateAPIView):
     serializer_class = SellerApplicationSerializer
 
     def perform_create(self, serializer):
-        if hasattr(self.request.user, "seller"):
-            raise serializers.ValidationError(
-                {
-                    "error": "You already have a seller profile",
-                }
+        try:
+            with transaction.atomic():
+                # Lock the owner even on the first application; a cached reverse
+                # OneToOne lookup cannot serialize competing create requests.
+                user = User.objects.select_for_update(no_key=True).get(pk=self.request.user.pk)
+                if Seller.objects.filter(user_id=user.pk).exists():
+                    raise serializers.ValidationError({"error": "You already have a seller profile"})
+                serializer.save(user=user)
+        except IntegrityError as exc:
+            cause = exc.__cause__
+            unique_violation = (
+                getattr(cause, "sqlstate", None) == "23505"
+                or getattr(cause, "pgcode", None) == "23505"
+                or getattr(cause, "sqlite_errorcode", None) in {1555, 2067}
             )
-
-        serializer.save(user=self.request.user)
+            if not unique_violation:
+                raise
+            # Store name/slug may also be claimed by a different applicant
+            # after serializer validation. Keep those uniqueness races in the
+            # validation contract without exposing database constraint details.
+            raise serializers.ValidationError({"store_name": "A seller profile or store identity already exists. Choose another store name or retry."}) from exc
 
 
 class SellerStatusView(generics.RetrieveAPIView):
