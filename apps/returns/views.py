@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.rbac.commerce import can_manage
-from apps.returns.models import ReturnAttachment, ReturnItem, ReturnRequest
+from apps.returns.models import ReturnAttachment, ReturnItem, ReturnRequest, ReturnStatusHistory
 from apps.returns.serializers import (
     CustomerReturnRequestDetailSerializer,
     ReturnActionSerializer,
@@ -39,13 +39,14 @@ class ReturnRequestViewSet(
 
     def get_queryset(self):
         queryset = ReturnRequest.objects.select_related(
-            "customer", "order", "reviewed_by"
-        ).prefetch_related(
-            "items",
-            "items__order_item",
-            "attachments",
-            "status_history",
+            "customer", "order", "reviewed_by", "shipment",
         )
+        if self.action != "list":
+            queryset = queryset.prefetch_related(
+                Prefetch("items", queryset=ReturnItem.objects.select_related("order_item")),
+                Prefetch("attachments", queryset=ReturnAttachment.objects.select_related("uploaded_by")),
+                Prefetch("status_history", queryset=ReturnStatusHistory.objects.select_related("changed_by")),
+            )
 
         if is_admin_user(self.request.user):
             return queryset.all()
@@ -74,6 +75,7 @@ class ReturnRequestViewSet(
         return ReturnRequestDetailSerializer
 
     def _detail_response(self, obj, *, response_status=status.HTTP_200_OK):
+        obj = self.get_queryset().get(pk=obj.pk)
         serializer_class = (
             ReturnRequestDetailSerializer
             if is_admin_user(self.request.user)

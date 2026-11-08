@@ -45,7 +45,7 @@ class PaymentViewSet(
         "user",
         "created_by",
     ).prefetch_related(
-        "events",
+        "events__created_by",
     )
 
     def get_queryset(self):
@@ -85,6 +85,11 @@ class PaymentViewSet(
 
         return PaymentDetailSerializer
 
+    def _detail_response(self, payment, *, response_status=status.HTTP_200_OK):
+        payment = self.get_queryset().get(pk=payment.pk)
+        serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
+        return Response(serializer.data, status=response_status)
+
     def create(self, request, *args, **kwargs):
         """
         Create a new payment attempt for an order.
@@ -104,8 +109,7 @@ class PaymentViewSet(
 
         payment = serializer.save()
 
-        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return self._detail_response(payment, response_status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-success")
     def mark_success(self, request, pk=None):
@@ -165,8 +169,7 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(payment)
 
     @action(detail=True, methods=["post"], url_path="mark-failed")
     def mark_failed(self, request, pk=None):
@@ -220,8 +223,7 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(payment)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
@@ -268,5 +270,4 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(payment)

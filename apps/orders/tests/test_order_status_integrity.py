@@ -161,7 +161,7 @@ class OrderStatusIntegrityTests(APITestCase):
             status.HTTP_200_OK,
         )
 
-        eligible_ids = {item["id"] for item in response.data}
+        eligible_ids = {item["id"] for item in response.data["results"]}
 
         self.assertIn(self.order.pk, eligible_ids)
 

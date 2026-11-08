@@ -4,9 +4,9 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.orders.models import Order
 from apps.rbac.commerce import can_manage, can_view_all
 from apps.shipping.models import Shipment
+from apps.shipping.querysets import eligible_order_queryset
 from apps.shipping.serializers import (
     EligibleShipmentOrderSerializer,
     ShipmentCancelSerializer,
@@ -47,7 +47,7 @@ class ShipmentViewSet(
         "created_by",
         "seller_fulfillment",
         "seller_fulfillment__seller",
-    ).prefetch_related("events")
+    ).prefetch_related("events__created_by")
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
@@ -134,45 +134,17 @@ class ShipmentViewSet(
         if not self._can_manage_shipments(request.user):
             return self._management_required_response()
 
-        orders = (
-            Order.objects.select_related("user")
-            .prefetch_related("items__product__seller", "seller_fulfillments")
-            .filter(
-                status__in=[
-                    Order.StatusChoices.PAID,
-                    Order.StatusChoices.PROCESSING,
-                ],
-                payment_status=Order.PaymentStatusChoices.PAID,
-            )
-            .order_by("-paid_at", "-created_at")
-        )
-
-        # Keep legacy (item-less) orders available until they have a shipment;
-        # orders with items are available while any seller can still ship.
-        eligible = []
-        excluded_statuses = [
-            Shipment.StatusChoices.CANCELLED,
-            Shipment.StatusChoices.RETURNED,
-        ]
-        seller_serializer = EligibleShipmentOrderSerializer(
-            context={"request": request}
-        )
-        for order in orders:
-            if order.items.exists():
-                if seller_serializer.get_eligible_sellers(order):
-                    eligible.append(order)
-                continue
-
-            has_active_shipment = (
-                Shipment.objects.filter(order=order)
-                .exclude(status__in=excluded_statuses)
-                .exists()
-            )
-            if not has_active_shipment:
-                eligible.append(order)
-
-        serializer = self.get_serializer(eligible, many=True)
+        orders = eligible_order_queryset()
+        page = self.paginate_queryset(orders)
+        serializer = self.get_serializer(page if page is not None else orders, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def _detail_response(self, shipment, *, response_status=status.HTTP_200_OK):
+        shipment = self.get_queryset().get(pk=shipment.pk)
+        serializer = ShipmentDetailSerializer(shipment, context=self.get_serializer_context())
+        return Response(serializer.data, status=response_status)
 
     def create(self, request, *args, **kwargs):
         """Create one shipment for the selected seller's part of a paid order.
@@ -192,10 +164,7 @@ class ShipmentViewSet(
         # converts its validation errors into DRF validation errors.
         shipment = serializer.save()
         self._notify(shipment, "shipment_created")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_201_CREATED,
-        )
+        return self._detail_response(shipment, response_status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-ready")
     def mark_ready(self, request, pk=None):
@@ -219,10 +188,7 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_ready")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
 
     @action(detail=True, methods=["post"], url_path="mark-shipped")
     def mark_shipped(self, request, pk=None):
@@ -248,10 +214,7 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_shipped")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")
     def mark_delivered(self, request, pk=None):
@@ -275,10 +238,7 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_delivered")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
@@ -302,7 +262,4 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_cancelled")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
