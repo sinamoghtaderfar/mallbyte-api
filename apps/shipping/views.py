@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.orders.models import Order
+from apps.rbac.commerce import can_manage, can_view_all
 from apps.shipping.models import Shipment
 from apps.shipping.serializers import (
     EligibleShipmentOrderSerializer,
@@ -72,10 +73,11 @@ class ShipmentViewSet(
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        """Staff can see every shipment; buyers only their own shipments."""
+        """Commerce readers/managers see all shipments; buyers see their own."""
         queryset = super().get_queryset()
         user = self.request.user
-        if user.is_staff or user.is_superuser:
+        allowed = can_manage(user, "shipments") if self.action in {"mark_ready", "mark_shipped", "mark_delivered", "cancel"} else can_view_all(user, "shipments")
+        if allowed:
             return queryset
         return queryset.filter(user=user)
 
@@ -97,13 +99,13 @@ class ShipmentViewSet(
         return ShipmentDetailSerializer
 
     @staticmethod
-    def _is_staff_user(user):
-        return user.is_staff or user.is_superuser
+    def _can_manage_shipments(user):
+        return can_manage(user, "shipments")
 
     @staticmethod
-    def _staff_required_response():
+    def _management_required_response():
         return Response(
-            {"detail": "Only staff users can manage shipments."},
+            {"detail": "Shipment management permission is required."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -129,8 +131,8 @@ class ShipmentViewSet(
         A multi-seller order remains eligible after its first seller receives a
         shipment. Older orders without order items retain the one-shipment rule.
         """
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         orders = (
             Order.objects.select_related("user")
@@ -178,8 +180,8 @@ class ShipmentViewSet(
         For a multi-seller order, supply `seller` with the seller's user ID.
         For a single-seller order the seller is inferred by the serializer.
         """
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         serializer = self.get_serializer(
             data=request.data,
@@ -197,8 +199,8 @@ class ShipmentViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-ready")
     def mark_ready(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentMarkReadySerializer(
@@ -224,8 +226,8 @@ class ShipmentViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-shipped")
     def mark_shipped(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentMarkShippedSerializer(
@@ -253,8 +255,8 @@ class ShipmentViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")
     def mark_delivered(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentMarkDeliveredSerializer(
@@ -280,8 +282,8 @@ class ShipmentViewSet(
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentCancelSerializer(

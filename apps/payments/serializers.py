@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.orders.models import Order
 from apps.payments.models import Payment, PaymentEvent
+from apps.rbac.commerce import can_manage, can_view_all
 
 # ============================================================
 # Payment Event Serializer
@@ -19,6 +20,15 @@ class PaymentEventSerializer(serializers.ModelSerializer):
     pending -> failed
     gateway callback received
     """
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request is None or not can_view_all(request.user, "payments"):
+            for name in ("data", "created_by", "created_by_name"):
+                fields.pop(name, None)
+        return fields
+
 
     created_by_name = serializers.ReadOnlyField(source="created_by.full_name")
 
@@ -91,6 +101,14 @@ class PaymentDetailSerializer(serializers.ModelSerializer):
     Full payment detail with events.
     """
 
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request is None or not can_view_all(request.user, "payments"):
+            fields.pop("gateway_response", None)
+        return fields
+
+
     order_number = serializers.ReadOnlyField(source="order.order_number")
     user_email = serializers.ReadOnlyField(source="user.email")
     user_full_name = serializers.ReadOnlyField(source="user.full_name")
@@ -160,7 +178,7 @@ class PaymentCreateSerializer(serializers.Serializer):
         request = self.context["request"]
         user = request.user
 
-        if not (user.is_staff or user.is_superuser):
+        if not can_manage(user, "payments"):
             if order.user_id != user.pk:
                 raise serializers.ValidationError("You cannot pay for this order.")
 
