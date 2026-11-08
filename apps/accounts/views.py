@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
+from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
 from rest_framework import generics, permissions, serializers, status, viewsets
@@ -8,7 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from apps.accounts.cookies import (
@@ -549,8 +550,12 @@ class PasswordResetVerifyView(generics.GenericAPIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        user.set_password(new_password)
-        user.save(update_fields=["password"])
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=user.pk)
+            user.set_password(new_password)
+            user.email_verified = True
+            user.email_verified_at = user.email_verified_at or timezone.now()
+            user.save(update_fields=["password", "email_verified", "email_verified_at"])
 
         return Response(
             {
@@ -574,16 +579,12 @@ class ChangePasswordView(generics.GenericAPIView):
         old_password = serializer.validated_data["old_password"]
         new_password = serializer.validated_data["new_password"]
 
-        if not user.check_password(old_password):
-            return Response(
-                {
-                    "old_password": "Wrong password",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        user.set_password(new_password)
-        user.save(update_fields=["password"])
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=user.pk)
+            if not user.check_password(old_password):
+                return Response({"old_password": "Wrong password"}, status=status.HTTP_400_BAD_REQUEST)
+            user.set_password(new_password)
+            user.save(update_fields=["password"])
 
         return Response(
             {
@@ -876,8 +877,26 @@ class CookieTokenRefreshView(generics.GenericAPIView):
 
 class LogoutView(generics.GenericAPIView):
     permission_classes = [permissions.AllowAny]
+    # Logout must always clear stale/invalid browser credentials as well.
+    authentication_classes = []
 
     def post(self, request):
+        raw_tokens = [(request.COOKIES.get(get_refresh_cookie_name()), RefreshToken)]
+        authorization = request.META.get("HTTP_AUTHORIZATION", "").split()
+        if len(authorization) == 2 and authorization[0].lower() == "bearer":
+            raw_tokens.append((authorization[1], AccessToken))
+        with transaction.atomic():
+            for raw, token_type in raw_tokens:
+                if not raw:
+                    continue
+                try:
+                    token = token_type(raw)
+                except TokenError:
+                    continue
+                user = User.objects.select_for_update().filter(pk=token.get("user_id")).first()
+                if user and identity_token_valid(user, token) and privileged_token_valid(user, token):
+                    user.invalidate_sessions()
+                    break
         response = Response(
             {
                 "message": "Logged out successfully",
