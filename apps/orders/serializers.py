@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import F, IntegerField, OuterRef, Prefetch, Subquery, Sum, prefetch_related_objects
+from django.db.models.functions import Coalesce
 from rest_framework import serializers
 
 from apps.discounts.services import apply_discount_to_order, validate_discount_for_cart
@@ -33,7 +35,12 @@ class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.ReadOnlyField(source="product.name")
     product_sku = serializers.ReadOnlyField(source="product.sku")
     product_price = serializers.ReadOnlyField(source="product.final_price")
-    available_stock = serializers.ReadOnlyField(source="product.available_stock")
+    available_stock = serializers.SerializerMethodField()
+
+    def get_available_stock(self, obj):
+        if hasattr(obj, "_cart_available_stock"):
+            return obj._cart_available_stock
+        return obj.product.available_stock
     total_price = serializers.DecimalField(
         max_digits=12,
         decimal_places=0,
@@ -76,11 +83,20 @@ class CartSerializer(serializers.ModelSerializer):
 
     items = CartItemSerializer(many=True, read_only=True)
     total_items = serializers.IntegerField(read_only=True)
-    subtotal = serializers.DecimalField(
-        max_digits=12,
-        decimal_places=0,
-        read_only=True,
-    )
+    subtotal = serializers.SerializerMethodField()
+
+    def get_subtotal(self, obj):
+        return str(sum((item.total_price for item in obj.items.all()), Decimal("0")))
+
+    def to_representation(self, instance):
+        available = Stock.objects.filter(product_id=OuterRef("product_id")).order_by().values("product_id").annotate(
+            value=Sum(F("quantity") - F("reserved_quantity")),
+        ).values("value")
+        items = CartItem.objects.select_related("product").annotate(
+            _cart_available_stock=Coalesce(Subquery(available, output_field=IntegerField()), 0),
+        )
+        prefetch_related_objects([instance], Prefetch("items", queryset=items))
+        return super().to_representation(instance)
 
     class Meta:
         model = Cart
@@ -276,6 +292,8 @@ class OrderListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_items_count(self, obj):
+        if hasattr(obj, "_items_count"):
+            return obj._items_count
         return obj.items.count()
 
 
@@ -381,9 +399,25 @@ class SellerFulfillmentStatusMixin:
         if request is None or not request.user.is_authenticated:
             return None
 
-        return obj.seller_fulfillments.filter(
-            seller_id=request.user.pk,
-        ).first()
+        if hasattr(obj, "seller_visible_fulfillments"):
+            return next(iter(obj.seller_visible_fulfillments), None)
+        cache = self.context.setdefault("_seller_fulfillment_cache", {})
+        key = (obj.pk, request.user.pk)
+        if key not in cache:
+            cache[key] = obj.seller_fulfillments.filter(seller_id=request.user.pk).first()
+        return cache[key]
+
+    def _seller_items(self, obj):
+        request = self.context.get("request")
+        if request is None or not request.user.is_authenticated:
+            return []
+        if hasattr(obj, "seller_visible_items"):
+            return obj.seller_visible_items
+        cache = self.context.setdefault("_seller_item_cache", {})
+        key = (obj.pk, request.user.pk)
+        if key not in cache:
+            cache[key] = list(obj.items.select_related("product").filter(product__seller_id=request.user.pk))
+        return cache[key]
 
     def get_seller_status(self, obj):
         fulfillment = self._seller_fulfillment(obj)
@@ -436,17 +470,6 @@ class SellerOrderListSerializer(
             "delivered_at",
         ]
         read_only_fields = fields
-
-    def _seller_items(self, obj):
-        request = self.context.get("request")
-        if request is None or not request.user.is_authenticated:
-            return []
-
-        return [
-            item
-            for item in obj.items.all()
-            if item.product.seller_id == request.user.pk
-        ]
 
     def get_seller_items_count(self, obj):
         return len(self._seller_items(obj))
@@ -510,28 +533,19 @@ class SellerOrderDetailSerializer(
         ]
         read_only_fields = fields
 
-    def _seller_items_queryset(self, obj):
-        request = self.context.get("request")
-        if request is None or not request.user.is_authenticated:
-            return obj.items.none()
-
-        return obj.items.select_related("product").filter(
-            product__seller=request.user,
-        )
-
     def get_items(self, obj):
         serializer = SellerOrderItemSerializer(
-            self._seller_items_queryset(obj),
+            self._seller_items(obj),
             many=True,
         )
         return serializer.data
 
     def get_seller_items_count(self, obj):
-        return self._seller_items_queryset(obj).count()
+        return len(self._seller_items(obj))
 
     def get_seller_total_amount(self, obj):
         return sum(
-            (item.total_price for item in self._seller_items_queryset(obj)),
+            (item.total_price for item in self._seller_items(obj)),
             Decimal("0"),
         )
 

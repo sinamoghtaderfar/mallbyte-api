@@ -64,7 +64,7 @@ class EligibleShipmentOrderSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _seller_ids(obj):
-        return list(obj.items.values_list("product__seller_id", flat=True).distinct())
+        return list(dict.fromkeys(item.product.seller_id for item in obj.items.all()))
 
     def get_requires_seller_selection(self, obj):
         return len(self._seller_ids(obj)) > 1
@@ -75,22 +75,18 @@ class EligibleShipmentOrderSerializer(serializers.ModelSerializer):
         if obj.payment_status != Order.PaymentStatusChoices.PAID:
             return []
 
-        active_shipments = Shipment.objects.filter(order=obj).exclude(
-            status__in=ACTIVE_SHIPMENT_EXCLUDED_STATUSES
-        )
-        if active_shipments.filter(seller_fulfillment__isnull=True).exists():
+        active_shipments = getattr(obj, "active_shipping_shipments", None)
+        if active_shipments is None:
+            active_shipments = list(Shipment.objects.filter(order=obj).exclude(
+                status__in=ACTIVE_SHIPMENT_EXCLUDED_STATUSES,
+            ).select_related("seller_fulfillment"))
+        if any(shipment.seller_fulfillment_id is None for shipment in active_shipments):
             return []
 
-        already_assigned = set(
-            active_shipments.values_list("seller_fulfillment__seller_id", flat=True)
-        )
-        statuses = dict(
-            SellerOrderFulfillment.objects.filter(order=obj).values_list(
-                "seller_id", "status"
-            )
-        )
+        already_assigned = {shipment.seller_fulfillment.seller_id for shipment in active_shipments}
+        statuses = {fulfillment.seller_id: fulfillment.status for fulfillment in obj.seller_fulfillments.all()}
         sellers = {}
-        for item in obj.items.select_related("product__seller"):
+        for item in obj.items.all():
             seller = item.product.seller
             if seller.pk in sellers or seller.pk in already_assigned:
                 continue
