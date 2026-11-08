@@ -3,8 +3,11 @@
 Only publishing permission can change a public publishable object. Authorization
 never relies solely on is_staff; Next.js Content Managers need no staff flag.
 """
-from django.db import transaction
-from django.db.models import Q
+from functools import wraps
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -37,6 +40,31 @@ from apps.content.visibility import can_view_unpublished, visible_nav_items
 from apps.observability.models import AuditLog
 
 
+def cms_write(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        try:
+            with transaction.atomic():
+                return func(*args, **kwargs)
+        except IntegrityError as exc:
+            raise serializers.ValidationError({"detail": "CMS data conflicts with an existing record or constraint."}) from exc
+    return wrapped
+
+
+def numeric_query_param(request, name):
+    value = request.query_params.get(name)
+    if value in (None, ""):
+        return None
+    try:
+        return serializers.IntegerField(min_value=1, max_value=2 ** 63 - 1).run_validation(value)
+    except serializers.ValidationError as exc:
+        raise serializers.ValidationError({name: exc.detail}) from exc
+
+
+def navigation_items_for(user):
+    return visible_nav_items(NavigationItem.objects.select_related("page", "menu", "parent"), user).order_by("order", "label", "pk")
+
+
 def visible_now_queryset(qs):
     now = timezone.now()
     return qs.filter(status=ContentPage.StatusChoices.PUBLISHED).filter(
@@ -59,25 +87,32 @@ def log_cms_action(request, instance, action, *, detail=""):
 class CMSViewSet(viewsets.ModelViewSet):
     """Inherited GET stays public; backend write and publish ACLs are separate."""
 
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if self.action in ("update", "partial_update", "destroy", "publish", "archive"):
+            # Publication-state object permissions must inspect the locked row.
+            queryset = queryset.select_for_update(of=("self",))
+        return queryset
+
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [AllowAny()]
         codename = PUBLISH if self.action in ("publish", "archive") else EDIT
         return [IsAuthenticated(), ContentPermission(codename)]
 
-    @transaction.atomic
+    @cms_write
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
 
-    @transaction.atomic
+    @cms_write
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
 
-    @transaction.atomic
+    @cms_write
     def partial_update(self, request, *args, **kwargs):
         return super().partial_update(request, *args, **kwargs)
 
-    @transaction.atomic
+    @cms_write
     def destroy(self, request, *args, **kwargs):
         obj = self.get_object()
         log_cms_action(request, obj, AuditLog.ActionChoices.DELETE)
@@ -113,7 +148,7 @@ class CMSViewSet(viewsets.ModelViewSet):
 
 class PublishableCMSViewSet(CMSViewSet):
     @action(detail=True, methods=["post"], url_path="publish")
-    @transaction.atomic
+    @cms_write
     def publish(self, request, **kwargs):
         obj = self.get_object()
         validate_publication_window({}, obj)
@@ -122,7 +157,7 @@ class PublishableCMSViewSet(CMSViewSet):
         return Response(self.get_serializer(obj).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="archive")
-    @transaction.atomic
+    @cms_write
     def archive(self, request, **kwargs):
         obj = self.get_object()
         obj.archive()
@@ -182,7 +217,9 @@ class FAQCategoryViewSet(CMSViewSet):
     lookup_field = "slug"
 
     def get_queryset(self):
-        qs = FAQCategory.objects.prefetch_related("items")
+        qs = FAQCategory.objects.prefetch_related(Prefetch(
+            "items", queryset=FAQItem.objects.select_related("category").order_by("order", "question", "pk"), to_attr="_cms_items",
+        ))
         viewer = can_view_unpublished(self.request.user)
         if not viewer:
             qs = qs.filter(is_active=True)
@@ -200,7 +237,7 @@ class FAQItemViewSet(CMSViewSet):
         viewer = can_view_unpublished(self.request.user)
         if not viewer:
             qs = qs.filter(is_active=True, category__is_active=True)
-        category = self.request.query_params.get("category")
+        category = numeric_query_param(self.request, "category")
         featured = self.request.query_params.get("is_featured")
         active = self.request.query_params.get("is_active")
         if category:
@@ -237,7 +274,9 @@ class NavigationMenuViewSet(CMSViewSet):
     lookup_field = "slug"
 
     def get_queryset(self):
-        qs = NavigationMenu.objects.prefetch_related("items", "items__children")
+        qs = NavigationMenu.objects.prefetch_related(Prefetch(
+            "items", queryset=navigation_items_for(self.request.user), to_attr="_cms_visible_items",
+        ))
         viewer = can_view_unpublished(self.request.user)
         if not viewer:
             qs = qs.filter(is_active=True)
@@ -254,10 +293,11 @@ class NavigationItemViewSet(CMSViewSet):
     serializer_class = NavigationItemSerializer
 
     def get_queryset(self):
-        qs = NavigationItem.objects.select_related("menu", "parent", "page")
-        qs = visible_nav_items(qs, self.request.user)
-        menu = self.request.query_params.get("menu")
-        parent = self.request.query_params.get("parent")
+        qs = navigation_items_for(self.request.user).prefetch_related(Prefetch(
+            "children", queryset=navigation_items_for(self.request.user), to_attr="_cms_visible_children",
+        ))
+        menu = numeric_query_param(self.request, "menu")
+        parent = numeric_query_param(self.request, "parent")
         if menu:
             qs = qs.filter(menu_id=menu)
         if parent:
@@ -276,22 +316,23 @@ class HomepageContentView(APIView):
         announcements = visible_now_queryset(Announcement.objects.filter(placement__in=[
             Announcement.PlacementChoices.GLOBAL, Announcement.PlacementChoices.HOME,
         ])).order_by("order", "-created_at")
-        pages = visible_now_queryset(ContentPage.objects.filter(
+        pages = visible_now_queryset(ContentPage.objects.select_related("created_by", "updated_by").filter(
             is_featured=True
         )).order_by("order", "title")
         faqs = FAQItem.objects.select_related("category").filter(
             is_active=True, is_featured=True, category__is_active=True,
         ).order_by("category__order", "order", "question")
+        limit = max(1, min(int(getattr(settings, "CMS_HOMEPAGE_ITEM_LIMIT", 20)), 100))
         response = Response({
-            "banners": BannerSerializer(banners, many=True, context={"request": request}).data,
+            "banners": BannerSerializer(banners[:limit], many=True, context={"request": request}).data,
             "announcements": AnnouncementSerializer(
-                announcements, many=True, context={"request": request}
+                announcements[:limit], many=True, context={"request": request}
             ).data,
             "featured_pages": ContentPageSerializer(
-                pages, many=True, context={"request": request}
+                pages[:limit], many=True, context={"request": request}
             ).data,
             "featured_faqs": FAQItemSerializer(
-                faqs, many=True, context={"request": request}
+                faqs[:limit], many=True, context={"request": request}
             ).data,
         }, status=status.HTTP_200_OK)
         response["Cache-Control"] = "private, no-store"

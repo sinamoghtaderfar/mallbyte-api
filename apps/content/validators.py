@@ -29,11 +29,11 @@ def validate_link(value):
         raise serializers.ValidationError("Invalid or unsafe URL.")
     if value.startswith("/"):
         return value
-    parts = urlsplit(value)
     try:
+        parts = urlsplit(value)
         valid_port = parts.port is None or 1 <= parts.port <= 65535
-    except ValueError:
-        valid_port = False
+    except ValueError as exc:
+        raise serializers.ValidationError("Invalid or unsafe URL.") from exc
     if (parts.scheme.lower() != "https" or not parts.hostname
             or parts.username is not None or parts.password is not None
             or not valid_port or parts.fragment):
