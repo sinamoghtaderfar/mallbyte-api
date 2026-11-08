@@ -171,6 +171,10 @@ class Order(models.Model):
         related_name="orders",
     )
 
+    checkout_key = models.CharField(max_length=128, blank=True, default="")
+    checkout_fingerprint = models.CharField(max_length=64, blank=True, default="")
+    reservation_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
     status = models.CharField(
         max_length=30,
         choices=StatusChoices.choices,
@@ -221,6 +225,11 @@ class Order(models.Model):
             models.Index(fields=["-created_at"]),
         ]
         constraints = [
+            models.UniqueConstraint(
+                fields=["user", "checkout_key"],
+                condition=~Q(checkout_key=""),
+                name="unique_checkout_key_per_user",
+            ),
             models.CheckConstraint(
                 condition=Q(subtotal__gte=0),
                 name="order_subtotal_non_negative",
@@ -295,7 +304,7 @@ class Order(models.Model):
             ]
         )
 
-    def cancel(self, user=None):
+    def cancel(self, user=None, note="Order cancelled."):
         """Cancel an unpaid order and release its reservations."""
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=self.pk)
@@ -313,7 +322,7 @@ class Order(models.Model):
             ):
                 raise ValidationError("Only unpaid pending orders can be cancelled.")
 
-            for item in order.items.select_related("product", "warehouse"):
+            for item in order.items.select_related("product", "warehouse").order_by("product_id", "warehouse_id", "pk"):
                 if not item.warehouse_id:
 
                     continue
@@ -380,6 +389,24 @@ class Order(models.Model):
                     "total_amount",
                     "updated_at",
                 ]
+            )
+
+            OrderStatusHistory.objects.create(
+                order=order, old_status=self.StatusChoices.PENDING_PAYMENT,
+                new_status=order.status, changed_by=user, note=note,
+            )
+            for fulfillment in order.seller_fulfillments.select_for_update():
+                old_status = fulfillment.status
+                fulfillment.status = self.StatusChoices.CANCELLED
+                fulfillment.save(update_fields=["status", "updated_at"])
+                SellerOrderFulfillmentHistory.objects.create(
+                    fulfillment=fulfillment, old_status=old_status,
+                    new_status=fulfillment.status, changed_by=user, note=note,
+                )
+            from apps.orders.services import create_order_notification
+
+            create_order_notification(
+                order=order, template_key="order_cancelled", order_id=order.order_number,
             )
 
             self.status = order.status
