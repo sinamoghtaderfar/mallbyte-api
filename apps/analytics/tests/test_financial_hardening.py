@@ -2,7 +2,6 @@
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
