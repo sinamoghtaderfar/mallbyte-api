@@ -1,8 +1,10 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from apps.orders.models import Order, OrderItem
 from apps.reviews.models import ProductReview
 from apps.reviews.notifications import create_review_notification
+from apps.reviews.services import update_product_review_stats
 
 
 class ProductReviewSerializer(serializers.ModelSerializer):
@@ -66,6 +68,11 @@ class ProductReviewSerializer(serializers.ModelSerializer):
 
         product = attrs.get("product")
 
+        if self.instance:
+            if product and product.pk != self.instance.product_id:
+                raise serializers.ValidationError({"product": "A review cannot be moved to another product."})
+            return attrs
+
         if product is None:
             return attrs
 
@@ -111,6 +118,18 @@ class ProductReviewSerializer(serializers.ModelSerializer):
             product_name=review.product.name,
         )
 
+        return review
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        instance = ProductReview.objects.select_for_update().get(pk=instance.pk)
+        changed = any(field in validated_data and validated_data[field] != getattr(instance, field)
+                      for field in ("rating", "title", "comment"))
+        if changed:
+            validated_data.update(status=ProductReview.StatusChoices.PENDING, approved_by=None, approved_at=None, rejected_reason="")
+        review = super().update(instance, validated_data)
+        if changed:
+            update_product_review_stats(review.product)
         return review
 
 
