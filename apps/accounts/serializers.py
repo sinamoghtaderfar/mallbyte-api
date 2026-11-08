@@ -3,10 +3,21 @@ import re
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import Address, Profile, Seller
+from .auth_tokens import issue_user_tokens
 
 User = get_user_model()
+
+
+class VerifiedTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        if not user.email_verified:
+            raise AuthenticationFailed("Verify your email using OTP before signing in.")
+        return issue_user_tokens(user)
 
 
 class UserSerializer(serializers.ModelSerializer):

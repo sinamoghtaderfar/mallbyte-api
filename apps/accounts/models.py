@@ -85,6 +85,8 @@ class User(AbstractUser):
     # email verification fields
     email_verified = models.BooleanField(default=False, verbose_name="Email Verified")
     email_verified_at = models.DateTimeField(null=True, blank=True, verbose_name="Email Verified At")
+    # JWTs issued before an ownership/security transition must not become valid later.
+    auth_version = models.PositiveIntegerField(default=1, editable=False)
 
     # Custom admin
     objects = UserManager()
