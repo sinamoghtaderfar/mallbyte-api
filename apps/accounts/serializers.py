@@ -6,8 +6,8 @@ from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import Address, Profile, Seller
 from .auth_tokens import issue_user_tokens
+from .models import Address, Profile, Seller
 
 User = get_user_model()
 

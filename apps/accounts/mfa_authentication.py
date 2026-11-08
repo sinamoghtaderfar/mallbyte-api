@@ -1,8 +1,8 @@
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .mfa import privileged_token_valid
 from .auth_tokens import identity_token_valid
+from .mfa import privileged_token_valid
 
 
 class MFAGuardedJWTAuthentication(JWTAuthentication):

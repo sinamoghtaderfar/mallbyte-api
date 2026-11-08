@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, router, transaction
 from django.db.models import F
 from django.db.models.functions import Lower
@@ -420,61 +421,50 @@ class Seller(models.Model):
             self.store_slug = slug
         super().save(*args, **kwargs)
 
-    def approve(self, admin_user):
-        """Approve seller application"""
-        self.status = self.StatusChoices.APPROVED
-        self.verified_by = admin_user
-        self.verified_at = timezone.now()
-        self.rejection_reason = ""
-        self.save(
-            update_fields=[
-                "status",
-                "verified_by",
-                "verified_at",
-                "rejection_reason",
-                "updated_at",
-            ]
-        )
-
-        self.user.is_seller = True
-        self.user.save(update_fields=["is_seller"])
-
+    def _decide_application(self, admin_user, *, approve, reason=""):
         from apps.rbac.models import Role
-        from apps.rbac.utils import assign_role
+        from apps.rbac.utils import assign_role, has_permission, remove_role
 
-        try:
-            vendor_role = Role.objects.get(name="vendor")
-            assign_role(self.user, vendor_role, admin_user)
+        permission = "approve_seller" if approve else "reject_seller"
+        if not has_permission(admin_user, permission):
+            raise PermissionDenied("Seller decision permission required.")
+        if not approve and (not isinstance(reason, str) or len(reason.strip()) < 3 or len(reason) > 2000):
+            raise ValidationError("A rejection reason between 3 and 2000 characters is required.")
 
-        except Role.DoesNotExist:
-            pass
+        with transaction.atomic():
+            # Checkout uses the same User -> Seller order. NO KEY UPDATE permits
+            # concurrent foreign-key references without weakening row exclusion.
+            user = User.objects.all_with_deleted().select_for_update(no_key=True).get(pk=self.user_id)
+            seller = type(self).objects.select_for_update(no_key=True).get(pk=self.pk)
+            if seller.status != self.StatusChoices.PENDING:
+                raise ValidationError("Only pending seller applications can be decided.")
+            if approve and (not user.is_active or user.is_deleted):
+                raise ValidationError("An unavailable account cannot become a seller.")
+            try:
+                vendor_role = Role.objects.get(name="vendor")
+            except Role.DoesNotExist as exc:
+                raise ValidationError("Vendor role is not configured; no seller state was changed.") from exc
+
+            seller.status = self.StatusChoices.APPROVED if approve else self.StatusChoices.REJECTED
+            seller.verified_by = admin_user
+            seller.verified_at = timezone.now()
+            seller.rejection_reason = "" if approve else reason.strip()
+            seller.save(update_fields=["status", "verified_by", "verified_at", "rejection_reason", "updated_at"])
+            user.is_seller = approve
+            user.save(update_fields=["is_seller"])
+            if approve:
+                assign_role(user, vendor_role, admin_user)
+            else:
+                remove_role(user, vendor_role)
+            self.refresh_from_db()
+
+    def approve(self, admin_user):
+        """Atomically approve a pending application and grant its vendor role."""
+        return self._decide_application(admin_user, approve=True)
 
     def reject(self, admin_user, reason):
-        """Reject seller application"""
-        self.status = self.StatusChoices.REJECTED
-        self.verified_by = admin_user
-        self.rejection_reason = reason
-        self.save(
-            update_fields=[
-                "status",
-                "verified_by",
-                "rejection_reason",
-                "updated_at",
-            ]
-        )
-
-        self.user.is_seller = False
-        self.user.save(update_fields=["is_seller"])
-
-        from apps.rbac.models import Role
-        from apps.rbac.utils import remove_role
-
-        try:
-            vendor_role = Role.objects.get(name="vendor")
-            remove_role(self.user, vendor_role)
-
-        except Role.DoesNotExist:
-            pass
+        """Atomically reject a pending application and revoke its vendor role."""
+        return self._decide_application(admin_user, approve=False, reason=reason)
 
     @property
     def is_verified(self):

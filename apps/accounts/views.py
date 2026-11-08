@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.http import Http404
@@ -19,11 +20,12 @@ from apps.accounts.cookies import (
     set_refresh_cookie,
 )
 
-from .models import OTP, Address, Profile, Seller
 from .auth_tokens import identity_token_valid, issue_user_tokens
 from .mfa import is_privileged, privileged_token_valid
 from .mfa_models import AdminMFAChallenge
+from .models import OTP, Address, Profile, Seller
 from .otp_delivery import OTPDeliveryError, mask_email, send_otp_email
+from .permissions import CanApproveSeller, CanDeleteUser, CanRejectSeller, IsAdminOrVendorManager
 from .serializers import (
     AddressSerializer,
     ChangePasswordSerializer,
@@ -262,14 +264,27 @@ class SellerApplyView(generics.CreateAPIView):
     serializer_class = SellerApplicationSerializer
 
     def perform_create(self, serializer):
-        if hasattr(self.request.user, "seller"):
-            raise serializers.ValidationError(
-                {
-                    "error": "You already have a seller profile",
-                }
+        try:
+            with transaction.atomic():
+                # Lock the owner even on the first application; a cached reverse
+                # OneToOne lookup cannot serialize competing create requests.
+                user = User.objects.select_for_update(no_key=True).get(pk=self.request.user.pk)
+                if Seller.objects.filter(user_id=user.pk).exists():
+                    raise serializers.ValidationError({"error": "You already have a seller profile"})
+                serializer.save(user=user)
+        except IntegrityError as exc:
+            cause = exc.__cause__
+            unique_violation = (
+                getattr(cause, "sqlstate", None) == "23505"
+                or getattr(cause, "pgcode", None) == "23505"
+                or getattr(cause, "sqlite_errorcode", None) in {1555, 2067}
             )
-
-        serializer.save(user=self.request.user)
+            if not unique_violation:
+                raise
+            # Store name/slug may also be claimed by a different applicant
+            # after serializer validation. Keep those uniqueness races in the
+            # validation contract without exposing database constraint details.
+            raise serializers.ValidationError({"store_name": "A seller profile or store identity already exists. Choose another store name or retry."}) from exc
 
 
 class SellerStatusView(generics.RetrieveAPIView):
@@ -321,7 +336,7 @@ class SellerStoreView(generics.RetrieveUpdateAPIView):
 class AdminSellersListView(generics.ListAPIView):
     """Admin: list all sellers with optional filters."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
@@ -344,7 +359,7 @@ class AdminSellersListView(generics.ListAPIView):
 class AdminSellerDetailView(generics.RetrieveAPIView):
     """Admin: view seller details."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
@@ -357,7 +372,7 @@ class AdminSellerDetailView(generics.RetrieveAPIView):
 class AdminPendingSellersView(generics.ListAPIView):
     """Admin: list pending seller applications."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdminOrVendorManager]
     serializer_class = SellerSerializer
 
     def get_queryset(self):
@@ -376,7 +391,7 @@ class AdminPendingSellersView(generics.ListAPIView):
 class AdminSellerVerifyView(generics.GenericAPIView):
     """Admin: approve a pending seller application."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanApproveSeller]
     serializer_class = SellerSerializer
 
     def post(self, request, pk):
@@ -399,7 +414,10 @@ class AdminSellerVerifyView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        seller.approve(request.user)
+        try:
+            seller.approve(request.user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
         seller.refresh_from_db()
 
         return Response(
@@ -416,10 +434,14 @@ class AdminSellerVerifyView(generics.GenericAPIView):
         )
 
 
+class SellerRejectionSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=2000, min_length=3, trim_whitespace=True)
+
+
 class AdminSellerRejectView(generics.GenericAPIView):
     """Admin: reject a pending seller application."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanRejectSeller]
     serializer_class = SellerSerializer
 
     def post(self, request, pk):
@@ -442,12 +464,12 @@ class AdminSellerRejectView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        reason = request.data.get("reason", "")
-
-        seller.reject(
-            admin_user=request.user,
-            reason=reason,
-        )
+        reason_serializer = SellerRejectionSerializer(data=request.data)
+        reason_serializer.is_valid(raise_exception=True)
+        try:
+            seller.reject(admin_user=request.user, reason=reason_serializer.validated_data["reason"])
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
         seller.refresh_from_db()
 
         return Response(
@@ -630,11 +652,12 @@ class DeleteAccountView(generics.GenericAPIView):
 class AdminDeleteUserView(generics.GenericAPIView):
     """Admin: delete a user account."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [CanDeleteUser]
 
+    @transaction.atomic
     def delete(self, request, user_id):
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.select_for_update().get(id=user_id)
 
         except User.DoesNotExist:
             return Response(
@@ -652,10 +675,10 @@ class AdminDeleteUserView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if user.is_superuser:
+        if user.is_superuser or (user.is_staff and not request.user.is_superuser):
             return Response(
                 {
-                    "error": "Cannot delete super admin accounts",
+                    "error": "Cannot delete protected accounts",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
