@@ -3,12 +3,17 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models, router, transaction
+from django.db import IntegrityError, models, router, transaction
 from django.db.models import F
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
 class UserManager(BaseUserManager):
+    @classmethod
+    def normalize_email(cls, email):
+        return super().normalize_email(email).strip().lower()
+
     def get_queryset(self):
         return super().get_queryset().filter(is_deleted=False)
 
@@ -117,6 +122,7 @@ class User(AbstractUser):
     class Meta:
         verbose_name = "User"
         verbose_name_plural = "Users"
+        constraints = [models.UniqueConstraint(Lower("email"), name="accounts_user_email_case_insensitive_unique")]
 
     # String representation of the user
     def __str__(self):
@@ -134,6 +140,8 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs):
         """Invalidate sessions for security changes, including Django admin saves."""
+        if "email" not in self.get_deferred_fields():
+            self.email = type(self).objects.normalize_email(self.email)
         security_fields = self._SECURITY_FIELDS
         update_fields = kwargs.get("update_fields")
         if self._state.adding:
@@ -263,6 +271,7 @@ class OTP(models.Model):
     class Meta:
         verbose_name = "OTP"
         verbose_name_plural = "OTPs"
+        constraints = [models.UniqueConstraint(fields=["email"], condition=models.Q(is_used=False), name="accounts_otp_one_unused_per_email")]
         indexes = [
             models.Index(fields=["email", "created_at"]),
         ]
@@ -281,24 +290,20 @@ class OTP(models.Model):
         """Generate a new OTP for an email address."""
         normalized_email = email.strip().lower()
 
-        cls.objects.filter(
-        email=normalized_email,
-        is_used=False,
-    ).update(is_used=True)
-
-        code = "".join(str(secrets.randbelow(10)) for _ in range(6))
-
-        expires_at = timezone.now() + timedelta(
-            seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)
-        )
-
-        otp = cls.objects.create(
-            email=normalized_email,
-            code=code,
-            expires_at=expires_at,
-        )
-        
-        return otp
+        # The unique partial index serializes even a first issuance, where
+        # there is no existing row to lock. Retry a competing insertion.
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    cls.objects.filter(email=normalized_email, is_used=False).update(is_used=True)
+                    return cls.objects.create(
+                        email=normalized_email,
+                        code="".join(str(secrets.randbelow(10)) for _ in range(6)),
+                        expires_at=timezone.now() + timedelta(seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)),
+                    )
+            except IntegrityError:
+                if attempt == 2:
+                    raise
 
     @classmethod
     def verify_otp(cls, email, code):
@@ -325,8 +330,10 @@ class OTP(models.Model):
             if otp.is_expired:
                 return False, "OTP has expired", None
 
+            consumed = cls.objects.filter(pk=otp.pk, is_used=False, expires_at__gt=timezone.now()).update(is_used=True)
+            if not consumed:
+                return False, "Invalid OTP code", None
             otp.is_used = True
-            otp.save(update_fields=["is_used"])
 
             return True, "OTP verified successfully", otp
 

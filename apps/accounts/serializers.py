@@ -13,6 +13,10 @@ User = get_user_model()
 
 
 class VerifiedTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        attrs[self.username_field] = attrs[self.username_field].strip().lower()
+        return super().validate(attrs)
+
     @classmethod
     def get_token(cls, user):
         if not user.email_verified:
@@ -74,7 +78,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         ]
 
     def validate_email(self, value):
-        return value.strip().lower()
+        value = value.strip().lower()
+        if User.objects.all_with_deleted().filter(email__iexact=value).exists():
+            raise serializers.ValidationError("This email is unavailable.")
+        return value
 
     def validate_phone(self, value):
         if not value:
@@ -97,7 +104,7 @@ class RegisterSerializer(serializers.ModelSerializer):
                     "password": "Passwords don't match"
                 }
             )
-
+        validate_password(attrs["password"], user=User(email=attrs.get("email", ""), full_name=attrs.get("full_name", "")))
         return attrs
 
     def create(self, validated_data):
@@ -330,11 +337,6 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     def validate_email(self, value):
         email = value.strip().lower()
 
-        if not User.objects.filter(email=email).exists():
-            raise serializers.ValidationError(
-                "No user found with this email address"
-            )
-
         return email
 
 class PasswordResetVerifySerializer(serializers.Serializer):
@@ -357,6 +359,11 @@ class PasswordResetVerifySerializer(serializers.Serializer):
 
         return value
 
+    def validate(self, attrs):
+        user = User.objects.all_with_deleted().filter(email__iexact=attrs["email"]).first()
+        validate_password(attrs["new_password"], user=user)
+        return attrs
+
 class ChangePasswordSerializer(serializers.Serializer):
     """Serializer for changing password (when logged in)"""
     old_password = serializers.CharField(write_only=True)
@@ -366,6 +373,7 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs['new_password'] != attrs['confirm_password']:
             raise serializers.ValidationError({"new_password": "Passwords don't match"})
+        validate_password(attrs["new_password"], user=self.context["request"].user)
         return attrs
     
 class DeleteAccountSerializer(serializers.Serializer):
@@ -382,10 +390,12 @@ class EmailVerifyRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
     
     def validate_email(self, value):
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-        if User.objects.filter(email=value, email_verified=True).exists():
-            raise serializers.ValidationError("This email is already verified by another user")
+        value = value.strip().lower()
+        user = self.context["request"].user
+        if User.objects.all_with_deleted().filter(email__iexact=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError("This email is unavailable.")
+        if user.email_verified and user.email.casefold() == value.casefold():
+            raise serializers.ValidationError("This email is already verified.")
         return value
     
 class EmailVerifyConfirmSerializer(serializers.Serializer):
