@@ -41,3 +41,9 @@ no other Django admin permission remains. Existing independent admin permissions
 preserve staff access. System role permission changes are consistently denied by
 both role-management APIs; seeded system policy is changed through reviewed
 migrations. Custom roles remain editable by superusers.
+
+Seller application creation also locks the owner before checking for an existing
+profile and inserting the application. Concurrent applications by one user return
+one success and one HTTP 400. Store name/slug uniqueness races between different
+users return a sanitized validation error; other database integrity failures are
+not mislabeled as validation errors.
