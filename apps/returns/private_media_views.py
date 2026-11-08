@@ -12,7 +12,7 @@ from apps.returns.models import ReturnAttachment, ReturnShipment
 
 
 def can_manage_return_files(user):
-    return has_permission(user, "view_all_returns")
+    return has_permission(user, "view_all_returns") or has_permission(user, "manage_returns")
 
 
 def private_download(field):
