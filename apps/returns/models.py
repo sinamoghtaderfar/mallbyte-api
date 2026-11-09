@@ -115,14 +115,14 @@ class ReturnRequest(TimeStampedModel):
     internal_note = models.TextField(blank=True)
 
     total_requested_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
     )
 
     total_approved_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
@@ -154,6 +154,10 @@ class ReturnRequest(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(total_approved_amount__gte=0),
                 name="return_total_approved_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_approved_amount__lte=models.F("total_requested_amount")),
+                name="return_approved_lte_requested",
             ),
         ]
 
@@ -231,14 +235,14 @@ class ReturnItem(TimeStampedModel):
     inspection_note = models.TextField(blank=True)
 
     requested_refund_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
     )
 
     approved_refund_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
@@ -262,6 +266,10 @@ class ReturnItem(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(approved_refund_amount__gte=0),
                 name="return_item_approved_refund_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(approved_refund_amount__lte=models.F("requested_refund_amount")),
+                name="return_item_approved_lte_requested",
             ),
         ]
 

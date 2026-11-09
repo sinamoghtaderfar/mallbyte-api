@@ -394,7 +394,7 @@ class ReturnApproveSerializer(serializers.Serializer):
         allow_blank=True,
     )
     approved_amount = serializers.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         required=False,
         min_value=0,
