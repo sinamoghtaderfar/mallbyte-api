@@ -1,4 +1,5 @@
 import time
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import override_settings
@@ -47,10 +48,10 @@ class PrivilegedMFATests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         return response.data
 
-    def complete(self, challenge, secret):
+    def complete(self, challenge, secret, code=None):
         response = self.client.post(
             "/api/auth/mfa/complete/",
-            {"challenge": challenge, "code": _totp(secret, int(time.time()) // 30)},
+            {"challenge": challenge, "code": code or _totp(secret, int(time.time()) // 30)},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
@@ -73,19 +74,23 @@ class PrivilegedMFATests(APITestCase):
         self.assertEqual(len(response.data["recovery_codes"]), 10)
         self.assertIn(get_refresh_cookie_name(), response.cookies)
 
-    def test_challenge_one_time_and_totp_replay_protection(self):
+    @patch("apps.accounts.mfa.time")
+    def test_challenge_one_time_and_totp_replay_protection(self, totp_clock):
+        now = time.time()
+        totp_clock.time.return_value = now
         first = self.begin()
         setup = self.setup(first["challenge"])
-        completed = self.complete(first["challenge"], setup["secret"])
+        original_code = _totp(setup["secret"], int(now) // 30)
+        completed = self.complete(first["challenge"], setup["secret"], code=original_code)
         duplicate = self.client.post("/api/auth/mfa/complete/", {
-            "challenge": first["challenge"], "code": _totp(setup["secret"], int(time.time()) // 30),
+            "challenge": first["challenge"], "code": original_code,
         }, format="json")
         self.assertEqual(duplicate.status_code, 400)
 
         enrolled = self.begin()
         self.assertTrue(enrolled["mfa_enrolled"])
         repeated = self.client.post("/api/auth/mfa/verify/", {
-            "challenge": enrolled["challenge"], "code": _totp(setup["secret"], int(time.time()) // 30),
+            "challenge": enrolled["challenge"], "code": original_code,
         }, format="json")
         self.assertEqual(repeated.status_code, 400)
         self.assertIn("access", completed.data)

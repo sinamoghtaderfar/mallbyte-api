@@ -16,6 +16,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .cache import build_cache_settings
+
 # Load environment variables
 load_dotenv()
 
@@ -118,8 +120,6 @@ DATABASES = {
     }
 }
 # Cache: deterministic configuration; Redis is mandatory outside DEBUG.
-from .cache import build_cache_settings
-
 CACHES = build_cache_settings(
     debug=DEBUG,
     backend=os.getenv("CACHE_BACKEND"),
@@ -256,6 +256,16 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+# The server owns shipping charges and pending inventory hold duration.
+CHECKOUT_SHIPPING_COST = os.getenv("CHECKOUT_SHIPPING_COST", "0")
+ORDER_RESERVATION_TTL_SECONDS = int(os.getenv("ORDER_RESERVATION_TTL_SECONDS", "1800"))
+CELERY_BEAT_SCHEDULE = {
+    "expire-pending-order-reservations": {
+        "task": "apps.orders.tasks.expire_pending_orders",
+        "schedule": 60.0,
+    },
+}
 
 ################################
 

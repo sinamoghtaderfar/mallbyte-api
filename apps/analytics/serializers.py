@@ -1,3 +1,4 @@
+from django.urls import reverse
 from rest_framework import serializers
 
 from apps.analytics.models import (
@@ -285,6 +286,7 @@ class AnalyticsGeneratedReportSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     file_url = serializers.SerializerMethodField()
+    file = serializers.SerializerMethodField(method_name="get_file_url")
 
     class Meta:
         model = AnalyticsGeneratedReport
@@ -316,10 +318,8 @@ class AnalyticsGeneratedReportSerializer(serializers.ModelSerializer):
 
         request = self.context.get("request")
 
-        if request:
-            return request.build_absolute_uri(obj.file.url)
-
-        return obj.file.url
+        url = reverse("analytics-generated-report-download", kwargs={"pk": obj.pk})
+        return request.build_absolute_uri(url) if request else url
 
 
 class GenerateAnalyticsReportNowSerializer(serializers.Serializer):
