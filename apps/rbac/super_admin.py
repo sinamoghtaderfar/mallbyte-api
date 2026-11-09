@@ -12,9 +12,10 @@ from apps.accounts.models import Seller
 from apps.orders.models import Order
 from apps.products.models import Product
 from apps.support.models import SupportTicket
-from .models import Role, RolePermission, AdminLog, Permission
+
+from .models import AdminLog, Permission, Role, RolePermission
 from .permissions import IsSuperAdmin
-from .serializers import RoleSerializer, PermissionSerializer
+from .serializers import PermissionSerializer, RoleSerializer
 from .utils import clear_role_permissions_cache, log_admin_action
 
 User = get_user_model()
