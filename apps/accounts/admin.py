@@ -2,6 +2,7 @@
 
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.db import transaction
 
 from apps.accounts.models import OTP, Address, Profile, User
 from apps.reviews.admin_roles import REVIEW_MODERATORS_GROUP_NAME, get_or_create_review_moderators_group
@@ -194,13 +195,14 @@ class UserAdmin(DjangoUserAdmin):
 
         updated_count = 0
 
-        for user in queryset:
-            user.is_staff = True
-            user.is_superuser = False
-            user.is_active = True
-            user.save(update_fields=["is_staff", "is_superuser", "is_active"])
-            user.groups.add(group)
-            updated_count += 1
+        with transaction.atomic():
+            for user in queryset.select_for_update():
+                if user.is_superuser or not user.is_active:
+                    continue
+                user.is_staff = True
+                user.save(update_fields=["is_staff"])
+                user.groups.add(group)
+                updated_count += 1
 
         self.message_user(
             request,
@@ -221,9 +223,13 @@ class UserAdmin(DjangoUserAdmin):
         group = get_or_create_review_moderators_group()
         updated_count = 0
 
-        for user in queryset:
-            user.groups.remove(group)
-            updated_count += 1
+        with transaction.atomic():
+            for user in queryset.select_for_update():
+                user.groups.remove(group)
+                if not user.is_superuser and not user.groups.filter(permissions__isnull=False).exists() and not user.user_permissions.exists():
+                    user.is_staff = False
+                    user.save(update_fields=["is_staff"])
+                updated_count += 1
 
         self.message_user(
             request,

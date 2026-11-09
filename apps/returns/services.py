@@ -8,6 +8,7 @@ from django.utils import timezone
 from apps.notifications.services import create_notification
 from apps.notifications.templates import render_notification_template
 from apps.orders.models import Order, OrderItem, SellerOrderFulfillment
+from apps.rbac.commerce import can_manage, can_view_all
 from apps.returns.models import (
     ReturnItem,
     ReturnRequest,
@@ -18,7 +19,7 @@ from apps.returns.refund_amounts import merchandise_net_by_item, refund_amount_f
 
 
 def is_admin_user(user):
-    return getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+    return can_view_all(user, "returns")
 
 
 def create_return_status_history(
@@ -211,7 +212,7 @@ def create_return_request(
 def cancel_return_request(*, return_request, user, note=""):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user) and return_request.customer_id != user.id:
+    if not can_manage(user, "returns") and return_request.customer_id != user.id:
         raise ValidationError("You cannot cancel this return request.")
 
     if return_request.status not in [
@@ -248,7 +249,7 @@ def cancel_return_request(*, return_request, user, note=""):
 def approve_return_request(*, return_request, user, note="", approved_amount=None):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can approve return requests.")
 
     if return_request.status not in [
@@ -328,7 +329,7 @@ def approve_return_request(*, return_request, user, note="", approved_amount=Non
 def reject_return_request(*, return_request, user, note=""):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can reject return requests.")
 
     if return_request.status not in [
@@ -384,7 +385,7 @@ def reject_return_request(*, return_request, user, note=""):
 def mark_return_item_received(*, return_request, user, note=""):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can mark return requests as received.")
 
     if return_request.status not in [
@@ -431,7 +432,7 @@ def mark_return_refunded(*, return_request, user, note=""):
     Order.objects.select_for_update().get(pk=return_request.order_id)
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can mark return requests as refunded.")
 
     if return_request.status not in [

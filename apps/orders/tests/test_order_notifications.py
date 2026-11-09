@@ -5,7 +5,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import User
+from apps.accounts.models import Seller, User
 from apps.inventory.models import Stock, Warehouse
 from apps.notifications.models import Notification
 from apps.orders.models import Cart, CartItem, Order
@@ -44,6 +44,10 @@ class OrderNotificationTests(APITestCase):
             is_staff=True,
             is_superuser=True,
         )
+
+        self.admin_user.is_seller = True
+        self.admin_user.save(update_fields=["is_seller"])
+        Seller.objects.create(user=self.admin_user, store_name="Order notification seller", status=Seller.StatusChoices.APPROVED)
 
         self.customer = self.create_test_user(
             phone="+989200000002",
