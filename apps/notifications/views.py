@@ -39,7 +39,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     - mark all notifications as read
     - get unread count
 
-    Admins can see all notifications.
+    Superusers can inspect all notifications. Staff status alone grants no access.
     """
 
     serializer_class = NotificationSerializer
@@ -53,9 +53,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         if isinstance(user, AnonymousUser):
             return queryset.none()
 
-        if not (
-            getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
-        ):
+        if not getattr(user, "is_superuser", False):
             queryset = queryset.filter(user=user)
 
         request = cast(Request, self.request)
