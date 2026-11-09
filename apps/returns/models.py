@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -379,3 +380,51 @@ class ReturnStatusHistory(TimeStampedModel):
 
     def __str__(self):
         return f"{self.return_request.request_number}: {self.old_status} → {self.new_status}"
+
+
+class RestorationQuerySet(models.QuerySet):
+    def bulk_create(self, objs, *args, **kwargs):
+        if kwargs.get("update_conflicts"):
+            raise ValidationError("Return stock restoration records are append-only.")
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def update(self, **kwargs):
+        raise ValidationError("Return stock restoration records are append-only.")
+
+    def delete(self):
+        raise ValidationError("Return stock restoration records are append-only.")
+
+
+class ReturnStockRestoration(models.Model):
+    """An explicit saleability decision and its one immutable inventory movement."""
+
+    return_item = models.ForeignKey(ReturnItem, on_delete=models.PROTECT, related_name="stock_restorations")
+    movement = models.OneToOneField("inventory.StockMovement", on_delete=models.PROTECT,
+                                  related_name="return_restoration")
+    warehouse = models.ForeignKey("inventory.Warehouse", on_delete=models.PROTECT,
+                                 related_name="return_restorations")
+    quantity = models.PositiveIntegerField()
+    idempotency_key = models.CharField(max_length=128)
+    sellable_confirmed = models.BooleanField(default=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                              related_name="return_stock_restorations")
+    note = models.CharField(max_length=2000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = RestorationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["return_item", "idempotency_key"], name="return_restock_item_key_unique"),
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="return_restock_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(sellable_confirmed=True), name="return_restock_sellable_confirmed"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding or self.pk is not None:
+            raise ValidationError("Return stock restoration records are append-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Return stock restoration records are append-only.")
