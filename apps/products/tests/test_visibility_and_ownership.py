@@ -107,7 +107,7 @@ class ProductVisibilityAndOwnershipTests(APITestCase):
         listing = self.client.get(reverse("product-my-products"))
         self.assertEqual(listing.status_code, status.HTTP_200_OK)
         self.assertEqual(
-            {item["id"] for item in listing.data},
+            {item["id"] for item in listing.data["results"]},
             {self.public_a.pk, self.pending_a.pk},
         )
         self.assertEqual(
