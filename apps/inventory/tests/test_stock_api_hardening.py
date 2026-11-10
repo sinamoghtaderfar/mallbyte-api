@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.db.models.deletion import ProtectedError
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -10,6 +11,7 @@ from apps.inventory.models import (
     StockMovement,
     Warehouse,
 )
+from apps.inventory.serializers import StockSerializer
 from apps.products.models import Category, Product
 from apps.rbac.models import Role, UserRole
 
@@ -295,6 +297,51 @@ class StockAPIHardeningTests(APITestCase):
             StockMovement.objects.count(),
             0,
         )
+
+    def test_stale_metadata_update_preserves_a_new_reservation(self):
+        serializer = StockSerializer(
+            self.stock, data={"aisle": "B4"}, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        fresh = Stock.objects.get(pk=self.stock.pk)
+        fresh.reserve(quantity=3, user=self.manager)
+
+        saved = serializer.save(updated_by=self.manager)
+
+        self.assertEqual(saved.reserved_quantity, 5)
+        self.assertEqual(saved.quantity, 18)
+        self.assertEqual(saved.aisle, "B4")
+        self.assertEqual(Stock.objects.get(pk=self.stock.pk).reserved_quantity, 5)
+
+    def test_stale_metadata_update_preserves_a_stock_movement(self):
+        serializer = StockSerializer(
+            self.stock, data={"shelf": "C2"}, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        StockMovement.objects.create(
+            product=self.product, warehouse=self.main,
+            movement_type=StockMovement.MovementType.ADJUSTMENT,
+            quantity=-4, reason="Audited inventory correction",
+            created_by=self.manager,
+        )
+
+        saved = serializer.save(updated_by=self.manager)
+
+        self.assertEqual(saved.quantity, 14)
+        self.assertEqual(saved.reserved_quantity, 2)
+        self.assertEqual(saved.shelf, "C2")
+        self.assertEqual(Stock.objects.get(pk=self.stock.pk).quantity, 14)
+
+    def test_warehouse_api_does_not_delete_stock_or_reservations(self):
+        response = self.client.delete(f"/api/inventory/warehouses/{self.main.pk}/")
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertTrue(Warehouse.objects.filter(pk=self.main.pk).exists())
+        self.assert_original_stock()
+
+    def test_warehouse_with_stock_is_protected_from_orm_deletion(self):
+        with self.assertRaises(ProtectedError):
+            self.main.delete()
+        self.assert_original_stock()
 
     def test_cannot_reassign_stock_warehouse(self):
         response = self.client.patch(
