@@ -1,22 +1,23 @@
-from django.shortcuts import get_object_or_404
-from django.db.models import F, Prefetch
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import F, Prefetch
+from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.rbac.commerce import can_manage
 from apps.returns.models import ReturnAttachment, ReturnItem, ReturnRequest
 from apps.returns.serializers import (
+    CustomerReturnRequestDetailSerializer,
     ReturnActionSerializer,
     ReturnApproveSerializer,
-    CustomerReturnRequestDetailSerializer,
-    SellerReturnRequestListSerializer,
-    SellerReturnRequestDetailSerializer,
     ReturnRequestCreateSerializer,
     ReturnRequestDetailSerializer,
     ReturnRequestListSerializer,
+    SellerReturnRequestDetailSerializer,
+    SellerReturnRequestListSerializer,
 )
 from apps.returns.services import (
     approve_return_request,
@@ -183,7 +184,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can approve return requests."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -211,7 +212,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can reject return requests."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -238,7 +239,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-received")
     def mark_received(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can mark return requests as received."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -265,7 +266,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-refunded")
     def mark_refunded(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can mark return requests as refunded."},
                 status=status.HTTP_403_FORBIDDEN,

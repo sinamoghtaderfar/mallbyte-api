@@ -8,6 +8,7 @@ from apps.accounts.models import User
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Category, Product
 from apps.returns.models import ReturnItem, ReturnRequest, ReturnStatusHistory
+from apps.returns.tests.helpers import record_verified_return_evidence
 
 
 class ReturnsFlowTests(APITestCase):
@@ -263,6 +264,8 @@ class ReturnsFlowTests(APITestCase):
 
         return_request.refresh_from_db()
         self.assertEqual(return_request.status, ReturnRequest.Status.ITEM_RECEIVED)
+
+        record_verified_return_evidence(return_request)
 
         refunded_url = reverse("return-request-mark-refunded", args=[return_request.id])
         refunded_response = self.client.post(

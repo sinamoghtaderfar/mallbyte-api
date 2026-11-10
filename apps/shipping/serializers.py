@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from apps.orders.models import Order, SellerOrderFulfillment
+from apps.rbac.commerce import can_manage
 from apps.shipping.models import Shipment, ShipmentEvent
 
 ACTIVE_SHIPMENT_EXCLUDED_STATUSES = (
@@ -240,8 +241,8 @@ class ShipmentCreateSerializer(serializers.Serializer):
 
     def validate_order(self, order):
         user = self.context["request"].user
-        if not (user.is_staff or user.is_superuser):
-            raise serializers.ValidationError("Only staff users can create shipments.")
+        if not can_manage(user, "shipments"):
+            raise serializers.ValidationError("Shipment management permission is required.")
         if (
             order.status
             not in {

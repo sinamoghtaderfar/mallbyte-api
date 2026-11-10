@@ -336,11 +336,13 @@ class AnalyticsGeneratedReportViewSet(
 
         filename = report.filename or report.file.name.split("/")[-1]
 
-        return FileResponse(
-            report.file.open("rb"),
-            as_attachment=True,
-            filename=filename,
-        )
+        try:
+            response = FileResponse(report.file.open("rb"), as_attachment=True, filename=filename)
+        except FileNotFoundError:
+            return Response({"detail": "Report file is not available."}, status=status.HTTP_404_NOT_FOUND)
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class GenerateAnalyticsReportNowView(
