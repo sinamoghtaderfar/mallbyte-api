@@ -1,9 +1,10 @@
 import csv
 
 import pandas as pd
-from django.db.models import F, IntegerField, Prefetch, Q, Sum, Value
-from django.db.models.functions import Coalesce
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
+from django.db import transaction
+from django.db.models import IntegerField, Prefetch, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -15,7 +16,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from apps.products.services import create_product_notification
+from apps.products.services import create_product_notification, requeue_product_for_review
 from apps.rbac.permissions import IsProductAdmin, IsVendor, user_has_active_role
 
 from .filters import ProductFilter
@@ -45,6 +46,7 @@ from .serializers import (
     TagSerializer,
     WishlistSerializer,
 )
+
 
 class CatalogOrderingFilter(filters.OrderingFilter):
     """Relevance-first search unless the customer explicitly chooses a sort order."""
@@ -162,6 +164,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         action = getattr(self, "action", None)
+        if action in ("approve", "reject", "feature"):
+            queryset = queryset.select_for_update(of=("self",))
         publicly_visible = Q(
             status=Product.StatusChoices.APPROVED,
             is_active=True,
@@ -233,6 +237,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def approve(self, request, pk=None):
         product = self.get_object()
 
@@ -251,11 +256,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response({"message": "Product approved successfully"})
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def reject(self, request, pk=None):
         product = self.get_object()
         reason = request.data.get("reason", "No reason provided")
 
         product.status = Product.StatusChoices.REJECTED
+        product.approved_by = None
+        product.approved_at = None
         product.save()
 
         create_product_notification(
@@ -272,6 +280,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response({"message": f"Product rejected. Reason: {reason}"})
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def feature(self, request, pk=None):
         product = self.get_object()
         product.is_featured = not product.is_featured
@@ -381,34 +390,46 @@ class ProductViewSet(viewsets.ModelViewSet):
 # ==================== Product Image Views ====================
 
 
-class ProductImageViewSet(viewsets.ModelViewSet):
+class SellerProductComponentMixin:
+    """Component edits invalidate moderation just like the parent product form."""
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        product = get_object_or_404(Product.objects.select_for_update(), pk=self.request.data.get("product"), seller=self.request.user)
+        serializer.save(product=product)
+        requeue_product_for_review(product)
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        product = get_object_or_404(Product.objects.select_for_update(), pk=serializer.instance.product_id, seller=self.request.user)
+        serializer.instance = get_object_or_404(self.get_queryset(), pk=serializer.instance.pk)
+        serializer.save()
+        requeue_product_for_review(product)
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        product = get_object_or_404(Product.objects.select_for_update(), pk=instance.product_id, seller=self.request.user)
+        instance = get_object_or_404(self.get_queryset(), pk=instance.pk)
+        instance.delete()
+        requeue_product_for_review(product)
+
+
+class ProductImageViewSet(SellerProductComponentMixin, viewsets.ModelViewSet):
     serializer_class = ProductImageSerializer
     permission_classes = [IsAuthenticated, IsVendor]
 
     def get_queryset(self):
         return ProductImage.objects.filter(product__seller=self.request.user)
 
-    def perform_create(self, serializer):
-        product_id = self.request.data.get("product")
-        product = get_object_or_404(Product, id=product_id, seller=self.request.user)
-        serializer.save(product=product)
-
-
 # ==================== Product Variant Views ====================
 
 
-class ProductVariantViewSet(viewsets.ModelViewSet):
+class ProductVariantViewSet(SellerProductComponentMixin, viewsets.ModelViewSet):
     serializer_class = ProductVariantSerializer
     permission_classes = [IsAuthenticated, IsVendor]
 
     def get_queryset(self):
         return ProductVariant.objects.filter(product__seller=self.request.user)
-
-    def perform_create(self, serializer):
-        product_id = self.request.data.get("product")
-        product = get_object_or_404(Product, id=product_id, seller=self.request.user)
-        serializer.save(product=product)
-
 
 # ==================== Wishlist Views ====================
 
@@ -418,7 +439,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Wishlist.objects.filter(user=self.request.user)
+        return Wishlist.objects.filter(user=self.request.user, product__status=Product.StatusChoices.APPROVED, product__is_active=True)
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

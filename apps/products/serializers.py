@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from .models import (
@@ -207,6 +208,20 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     }
         return [labels_map.get(label, label) for label in (obj.labels or [])]
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        from apps.rbac.permissions import user_has_active_role
+        privileged = bool(user and user.is_authenticated and (
+            user.pk == instance.seller_id or user.is_superuser or user_has_active_role(user, "product_admin")
+        ))
+        if not privileged:
+            data.pop("cost_per_item", None)
+            data.pop("seller_email", None)
+        return data
+
+
 class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating/updating products (for vendors)"""
     id = serializers.IntegerField(read_only=True)
@@ -218,6 +233,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     stock = serializers.IntegerField(read_only=True)
     available_stock = serializers.IntegerField(read_only=True)
     reserved_stock = serializers.IntegerField(read_only=True)
+    is_featured = serializers.BooleanField(read_only=True)
     class Meta:
         model = Product
         fields = [
@@ -230,6 +246,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
             'barcode', 'labels',
         ]
     
+    @transaction.atomic
     def create(self, validated_data):
         images_data = validated_data.pop('images', [])
         variants_data = validated_data.pop('variants', [])
@@ -247,13 +264,19 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         
         return product
     
+    @transaction.atomic
     def update(self, instance, validated_data):
+        # Re-read under the same lock used by approve/reject before changing data.
+        instance = Product.objects.select_for_update().get(pk=instance.pk)
         images_data = validated_data.pop('images', [])
         variants_data = validated_data.pop('variants', [])
         tags_data = validated_data.pop('tags', [])
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        instance.status = Product.StatusChoices.PENDING
+        instance.approved_by = None
+        instance.approved_at = None
         instance.save()
         
         # Update images
@@ -276,9 +299,20 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
     
 
 class WishlistSerializer(serializers.ModelSerializer):
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(status=Product.StatusChoices.APPROVED, is_active=True))
     product_name = serializers.ReadOnlyField(source='product.name')
     product_price = serializers.ReadOnlyField(source='product.price')
     product_image = serializers.SerializerMethodField()
+
+    def validate_product(self, product):
+        request = self.context.get("request")
+        if self.instance and request and Wishlist.objects.filter(user=request.user, product=product).exclude(pk=self.instance.pk).exists():
+            raise serializers.ValidationError("This product is already in your wishlist.")
+        return product
+
+    def create(self, validated_data):
+        item, _ = Wishlist.objects.get_or_create(**validated_data)
+        return item
     
     class Meta:
         model = Wishlist
