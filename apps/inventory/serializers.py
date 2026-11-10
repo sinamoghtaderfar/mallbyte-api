@@ -150,6 +150,22 @@ class StockSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def update(self, instance, validated_data):
+        # A metadata request may have loaded this instance before a checkout or
+        # stock movement committed. Never write its stale quantity/reservation.
+        metadata_fields = {
+            "low_stock_threshold", "aisle", "shelf", "bin_code", "updated_by",
+        }
+        changed = []
+        for field, value in validated_data.items():
+            if field in metadata_fields:
+                setattr(instance, field, value)
+                changed.append(field)
+        if changed:
+            instance.save(update_fields=[*changed, "last_updated"])
+        instance.refresh_from_db()
+        return instance
+
 
 class StockListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for stock lists."""

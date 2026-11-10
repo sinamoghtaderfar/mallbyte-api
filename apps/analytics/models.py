@@ -7,6 +7,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from apps.support.storage import PrivateMediaStorage
+
 
 def analytics_report_upload_path(instance, filename):
     now = timezone.now()
@@ -295,6 +297,7 @@ class AnalyticsGeneratedReport(models.Model):
 
     file = models.FileField(
         upload_to=analytics_report_upload_path,
+        storage=PrivateMediaStorage(),
         null=True,
         blank=True,
     )

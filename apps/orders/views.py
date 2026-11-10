@@ -30,7 +30,7 @@ from apps.orders.serializers import (
     UpdateCartItemSerializer,
 )
 from apps.orders.services import create_order_notification
-from apps.rbac.permissions import IsProductAdmin
+from apps.rbac.commerce import CanManageOrders, can_manage, can_view_all
 
 # ============================================================
 # Cart ViewSet
@@ -86,6 +86,7 @@ class CartViewSet(viewsets.GenericViewSet):
         cart = self.get_cart()
 
         with transaction.atomic():
+            cart = Cart.objects.select_for_update().get(pk=cart.pk)
             cart_item, created = CartItem.objects.get_or_create(
                 cart=cart,
                 product=product,
@@ -127,6 +128,11 @@ class CartViewSet(viewsets.GenericViewSet):
         /api/orders/cart/items/{item_id}/
         """
         cart = self.get_cart()
+        with transaction.atomic():
+            cart = Cart.objects.select_for_update().get(pk=cart.pk)
+            return self._mutate_item(request, cart, item_id)
+
+    def _mutate_item(self, request, cart, item_id):
         cart_item = get_object_or_404(CartItem, id=item_id, cart=cart)
 
         if request.method == "PATCH":
@@ -155,7 +161,9 @@ class CartViewSet(viewsets.GenericViewSet):
         Remove all items from cart.
         """
         cart = self.get_cart()
-        cart.clear()
+        with transaction.atomic():
+            cart = Cart.objects.select_for_update().get(pk=cart.pk)
+            cart.clear()
 
         return Response(
             {"message": "Cart cleared successfully."},
@@ -188,7 +196,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         """
         Normal users see only their own orders.
-        Staff/superuser see all orders.
+        Explicit commerce readers/managers can see all orders.
         """
         user = self.request.user
 
@@ -197,7 +205,8 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
             "status_history",
         )
 
-        if user.is_staff or user.is_superuser:
+        allowed = can_manage(user, "orders") if self.action in {"cancel", "update_status"} else can_view_all(user, "orders")
+        if allowed:
             return queryset.all()
 
         return queryset.filter(user=user)
@@ -275,7 +284,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
 
         order = serializer.save()
 
-        response_serializer = OrderDetailSerializer(order)
+        response_serializer = OrderDetailSerializer(order, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="cancel")
@@ -288,7 +297,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         """
         order = self.get_object()
 
-        if not (request.user.is_staff or request.user.is_superuser):
+        if not can_manage(request.user, "orders"):
             if order.user != request.user:
                 return Response(
                     {"detail": "You cannot cancel this order."},
@@ -301,8 +310,6 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        old_status = order.status
-
         try:
             order.cancel(user=request.user)
         except DjangoValidationError as exc:
@@ -311,20 +318,8 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        OrderStatusHistory.objects.create(
-            order=order,
-            old_status=old_status,
-            new_status=order.status,
-            changed_by=request.user,
-            note="Order cancelled.",
-        )
-        create_order_notification(
-            order=order,
-            template_key="order_cancelled",
-            order_id=order.order_number,
-        )
         order.refresh_from_db()
-        response_serializer = OrderDetailSerializer(order)
+        response_serializer = OrderDetailSerializer(order, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="seller")
@@ -440,7 +435,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         detail=True,
         methods=["post"],
         url_path="update-status",
-        permission_classes=[IsAuthenticated, IsProductAdmin],
+        permission_classes=[IsAuthenticated, CanManageOrders],
     )
     def update_status(self, request, pk=None):
         """Move an already-paid order to processing as an administrator."""
@@ -479,7 +474,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
                 metadata={"status": order.status},
             )
 
-        response_serializer = OrderDetailSerializer(order)
+        response_serializer = OrderDetailSerializer(order, context=self.get_serializer_context())
         return Response(
             response_serializer.data,
             status=status.HTTP_200_OK,
