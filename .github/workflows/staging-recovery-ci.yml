@@ -20,7 +20,9 @@ jobs:
           docker compose -f compose.staging.yaml config --quiet
       - name: Check backup and restore shell syntax
         run: |
-          bash -n ops/postgres-backup.sh ops/postgres-restore-staging.sh
+          bash -n ops/postgres-backup.sh ops/postgres-restore-staging.sh ops/postgres-client-check.sh
+      - name: Check PostgreSQL client compatibility guards
+        run: python3 -B -m unittest ops.tests.test_postgres_client_check -v
       - name: Ensure production restore targets are refused
         run: |
           set -e

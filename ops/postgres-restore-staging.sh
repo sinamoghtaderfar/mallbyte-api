@@ -17,6 +17,8 @@ if [[ ! -f "$BACKUP_FILE" || -L "$BACKUP_FILE" ]]; then
 fi
 command -v pg_restore >/dev/null || { echo "pg_restore required" >&2; exit 2; }
 export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGDATABASE="$DB_NAME" PGPASSWORD="$DB_PASSWORD"
+source "$(dirname -- "${BASH_SOURCE[0]}")/postgres-client-check.sh"
+require_matching_postgres_clients
 pg_restore --list "$BACKUP_FILE" >/dev/null
 if [[ -f "${BACKUP_FILE}.sha256" ]]; then
   command -v sha256sum >/dev/null || { echo "sha256sum required" >&2; exit 2; }
