@@ -16,6 +16,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from apps.common.exports import safe_spreadsheet_value
 from apps.products.services import create_product_notification, requeue_product_for_review
 from apps.rbac.permissions import IsProductAdmin, IsVendor, user_has_active_role
 
@@ -509,7 +510,7 @@ class ProductExportView(generics.GenericAPIView):
 
         for product in products:
             writer.writerow(
-                [
+                [safe_spreadsheet_value(value) for value in [
                     product.id,
                     product.name,
                     product.price,
@@ -518,7 +519,7 @@ class ProductExportView(generics.GenericAPIView):
                     product.category.name if product.category else "-",
                     product.brand.name if product.brand else "-",
                     product.created_at,
-                ]
+                ]]
             )
 
         return response
@@ -548,7 +549,7 @@ class ProductExportView(generics.GenericAPIView):
 
         for product in products:
             ws.append(
-                [
+                [safe_spreadsheet_value(value) for value in [
                     product.id,
                     product.name,
                     product.price,
@@ -557,7 +558,7 @@ class ProductExportView(generics.GenericAPIView):
                     product.category.name if product.category else "-",
                     product.brand.name if product.brand else "-",
                     product.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                ]
+                ]]
             )
 
         wb.save(response)

@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from django.conf import settings
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.conf import settings
 from django.db.models import Count, F, Sum
 from django.db.models.functions import Upper
 from django.utils import timezone
