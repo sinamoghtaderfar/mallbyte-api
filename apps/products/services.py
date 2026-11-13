@@ -1,5 +1,19 @@
+from django.db import transaction
+
 from apps.notifications.services import create_notification
 from apps.notifications.templates import render_notification_template
+from apps.products.models import Product
+
+
+@transaction.atomic
+def requeue_product_for_review(product):
+    """Serialize seller edits with moderation and invalidate old approval."""
+    product = Product.objects.select_for_update().get(pk=product.pk)
+    product.status = Product.StatusChoices.PENDING
+    product.approved_by = None
+    product.approved_at = None
+    product.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+    return product
 
 
 def create_product_notification(

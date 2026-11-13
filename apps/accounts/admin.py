@@ -1,11 +1,24 @@
 # apps/accounts/admin.py
 
 from django.contrib import admin, messages
+from django.contrib.auth.admin import GroupAdmin as DjangoGroupAdmin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.contrib.auth.models import Group
 from django.db import transaction
 
 from apps.accounts.models import OTP, Address, Profile, User
+from apps.rbac.admin_security import SuperuserMutationAdminMixin
 from apps.reviews.admin_roles import REVIEW_MODERATORS_GROUP_NAME, get_or_create_review_moderators_group
+
+# Group permissions can grant identity/RBAC administration capabilities too.
+if admin.site.is_registered(Group):
+    admin.site.unregister(Group)
+
+
+@admin.register(Group)
+class GroupAdmin(SuperuserMutationAdminMixin, DjangoGroupAdmin):
+    pass
+
 
 # ============================================================
 # User Inlines
@@ -58,7 +71,7 @@ class AddressInline(admin.TabularInline):
 # ============================================================
 
 @admin.register(User)
-class UserAdmin(DjangoUserAdmin):
+class UserAdmin(SuperuserMutationAdminMixin, DjangoUserAdmin):
     """
     Admin page for custom User model.
 
@@ -349,6 +362,12 @@ class AddressAdmin(admin.ModelAdmin):
 
 @admin.register(OTP)
 class OTPAdmin(admin.ModelAdmin):
+    def has_view_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
     list_display = [
         "id",
         "phone",

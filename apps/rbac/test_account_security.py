@@ -1,5 +1,5 @@
-from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from threading import Barrier, Event
 from unittest import skipUnless
 from unittest.mock import patch
 
@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, connections, transaction
 from django.test import TransactionTestCase
 from django.utils import timezone
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import Seller
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
@@ -182,3 +182,70 @@ class SellerDecisionConcurrencyTests(TransactionTestCase):
         approved = seller.status == Seller.StatusChoices.APPROVED
         self.assertEqual(owner.is_seller, approved)
         self.assertEqual(UserRole.objects.filter(user=owner, role__name="vendor", is_active=True).exists(), approved)
+
+
+@skipUnless(connection.vendor == "postgresql", "PostgreSQL row-lock and unique-index semantics required")
+class SellerApplicationConcurrencyTests(TransactionTestCase):
+    def apply(self, user_id, name):
+        close_old_connections()
+        try:
+            client = APIClient()
+            client.force_authenticate(User.objects.get(pk=user_id))
+            return client.post("/api/auth/seller/apply/", {
+                "store_name": name, "business_email": "shop@example.com", "business_phone": "09123456789",
+            }, format="json").status_code
+        finally:
+            connections.close_all()
+
+    def test_second_application_waits_for_first_and_returns_validation_error(self):
+        owner = User.objects.create_user(email="owner@example.com")
+        from apps.accounts.views import SellerApplyView
+
+        first_started = Event()
+        second_started = Event()
+        release_first = Event()
+        original = Seller.save
+        original_create = SellerApplyView.perform_create
+
+        def observed_create(view, serializer):
+            if serializer.validated_data["store_name"] == "Second shop":
+                second_started.set()
+            return original_create(view, serializer)
+
+        def held_save(instance, *args, **kwargs):
+            if instance.store_name == "First shop":
+                first_started.set()
+                if not release_first.wait(timeout=10):
+                    raise AssertionError("First application was not released")
+            return original(instance, *args, **kwargs)
+
+        with patch.object(Seller, "save", held_save), patch.object(SellerApplyView, "perform_create", observed_create), ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(self.apply, owner.pk, "First shop")
+            self.assertTrue(first_started.wait(timeout=10))
+            second = executor.submit(self.apply, owner.pk, "Second shop")
+            self.assertTrue(second_started.wait(timeout=10))
+            try:
+                with self.assertRaises(TimeoutError):
+                    second.result(timeout=0.25)
+            finally:
+                release_first.set()
+            self.assertEqual(first.result(timeout=10), 201)
+            self.assertEqual(second.result(timeout=10), 400)
+        self.assertEqual(list(Seller.objects.filter(user=owner).values_list("store_name", flat=True)), ["First shop"])
+
+    def test_two_users_claiming_same_store_identity_receive_one_success_and_one_400(self):
+        from apps.accounts.serializers import SellerApplicationSerializer
+
+        owners = [User.objects.create_user(email=f"owner-{index}@example.com") for index in range(2)]
+        barrier = Barrier(2)
+        original = SellerApplicationSerializer.validate_store_name
+
+        def simultaneous_validation(serializer, value):
+            result = original(serializer, value)
+            barrier.wait(timeout=10)
+            return result
+
+        with patch.object(SellerApplicationSerializer, "validate_store_name", simultaneous_validation), ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(self.apply, owner.pk, "Same shop") for owner in owners]
+            self.assertEqual(sorted(f.result(timeout=15) for f in futures), [201, 400])
+        self.assertEqual(Seller.objects.filter(store_name="Same shop").count(), 1)

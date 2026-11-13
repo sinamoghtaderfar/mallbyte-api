@@ -1,9 +1,9 @@
 """Currency-safe financial reporting for analytics endpoints."""
 
 from datetime import datetime, timedelta
-from django.conf import settings
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import Count, F, Sum
 from django.db.models.functions import TruncDate, Upper
 from django.utils import timezone

@@ -118,6 +118,20 @@ class CommerceQueryPerformanceTests(APITestCase):
             self.assertEqual(response.status_code, 400, response.data)
             self.assertIn("items", response.data)
 
+    def test_cart_available_stock_excludes_inactive_warehouses(self):
+        cart = Cart.objects.create(user=self.customer)
+        CartItem.objects.create(cart=cart, product=self.product, quantity=1, unit_price=100)
+        inactive = Warehouse.objects.create(name="Closed", code="CLOSED", is_active=False)
+        Stock.objects.create(product=self.product, warehouse=inactive, quantity=100)
+        Stock.objects.filter(product=self.product, warehouse=self.warehouse).update(reserved_quantity=3)
+        self.client.force_authenticate(self.customer)
+        response = self.client.get(reverse("cart-list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["items"][0]["available_stock"], 7)
+        Warehouse.objects.filter(pk=self.warehouse.pk).update(is_active=False)
+        response = self.client.get(reverse("cart-list"))
+        self.assertEqual(response.data["items"][0]["available_stock"], 0)
+
     def test_return_detail_queries_do_not_grow_per_attachment_or_history(self):
         order = self.create_order()
         claim = ReturnRequest.objects.create(order=order, customer=self.customer, total_requested_amount=100)

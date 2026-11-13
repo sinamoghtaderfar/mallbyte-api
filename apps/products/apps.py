@@ -7,4 +7,4 @@ class ProductsConfig(AppConfig):
     verbose_name = 'Products'
 
     def ready(self):
-        pass
+        from . import signals  # noqa: F401
