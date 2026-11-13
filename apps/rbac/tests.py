@@ -386,7 +386,7 @@ class RBACUtilsTestCase(RBACTestMixin, TestCase):
         self.assertEqual(log.ip_address, "127.0.0.1")
         self.assertEqual(log.user_agent, "pytest-agent")
 
-    def test_get_client_ip_uses_forwarded_for(self):
+    def test_get_client_ip_ignores_an_untrusted_forwarded_chain(self):
         factory = RequestFactory()
         request = factory.get(
             "/",
@@ -394,7 +394,7 @@ class RBACUtilsTestCase(RBACTestMixin, TestCase):
             REMOTE_ADDR="127.0.0.1",
         )
 
-        self.assertEqual(get_client_ip(request), "10.0.0.1")
+        self.assertEqual(get_client_ip(request), "127.0.0.1")
 
 
 class RBACSerializerTestCase(RBACTestMixin, TestCase):
