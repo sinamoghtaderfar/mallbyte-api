@@ -230,7 +230,7 @@ class EligibleShipmentOrdersTests(APITestCase):
 
         self.assertEqual(
             response.data["detail"],
-            "Only staff users can manage shipments.",
+            "Shipment management permission is required.",
         )
 
     def test_created_shipment_removes_order_from_eligible_orders(self):

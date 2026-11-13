@@ -1,7 +1,7 @@
 from django.urls import include, path
-from .super_admin import ConsoleOverviewView, ConsoleUsersViewSet, ConsoleProductsViewSet, ConsoleRolesView, ConsoleRolePermissionView
 from rest_framework.routers import DefaultRouter
 
+from .super_admin import ConsoleOverviewView, ConsoleProductsViewSet, ConsoleRolePermissionView, ConsoleRolesView, ConsoleUsersViewSet
 from .views import (
     AdminLogDetailView,
     AdminLogListView,

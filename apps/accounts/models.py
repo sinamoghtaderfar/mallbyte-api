@@ -3,11 +3,18 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError, models, router, transaction
+from django.db.models import F
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
 class UserManager(BaseUserManager):
+    @classmethod
+    def normalize_email(cls, email):
+        return super().normalize_email(email).strip().lower()
+
     def get_queryset(self):
         return super().get_queryset().filter(is_deleted=False)
 
@@ -60,6 +67,7 @@ class User(AbstractUser):
 
     # Remove the default username field
     username = None
+    _SECURITY_FIELDS = frozenset({"password", "email", "email_verified", "is_active", "is_deleted", "is_staff", "is_superuser"})
 
     phone = models.CharField(
     max_length=15,
@@ -85,6 +93,8 @@ class User(AbstractUser):
     # email verification fields
     email_verified = models.BooleanField(default=False, verbose_name="Email Verified")
     email_verified_at = models.DateTimeField(null=True, blank=True, verbose_name="Email Verified At")
+    # JWTs issued before an ownership/security transition must not become valid later.
+    auth_version = models.PositiveIntegerField(default=1, editable=False)
 
     # Custom admin
     objects = UserManager()
@@ -113,10 +123,62 @@ class User(AbstractUser):
     class Meta:
         verbose_name = "User"
         verbose_name_plural = "Users"
+        constraints = [models.UniqueConstraint(Lower("email"), name="accounts_user_email_case_insensitive_unique")]
 
     # String representation of the user
     def __str__(self):
         return f"{self.full_name} - {self.email}"
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_security_state = {name: value for name, value in zip(field_names, values, strict=True) if name in cls._SECURITY_FIELDS}
+        return instance
+
+    def refresh_from_db(self, *args, **kwargs):
+        super().refresh_from_db(*args, **kwargs)
+        self._loaded_security_state = {field: getattr(self, field) for field in self._SECURITY_FIELDS if field not in self.get_deferred_fields()}
+
+    def save(self, *args, **kwargs):
+        """Invalidate sessions for security changes, including Django admin saves."""
+        if "email" not in self.get_deferred_fields():
+            self.email = type(self).objects.normalize_email(self.email)
+        security_fields = self._SECURITY_FIELDS
+        update_fields = kwargs.get("update_fields")
+        if self._state.adding:
+            result = super().save(*args, **kwargs)
+            self._loaded_security_state = {field: getattr(self, field) for field in security_fields if field not in self.get_deferred_fields()}
+            return result
+        if update_fields is not None and not security_fields.intersection(update_fields):
+            return super().save(*args, **kwargs)
+        database = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=database):
+            previous = type(self)._base_manager.using(database).select_for_update().filter(pk=self.pk).values(*security_fields, "auth_version").first()
+            if previous is not None:
+                relevant = security_fields if update_fields is None else security_fields.intersection(update_fields)
+                loaded = getattr(self, "_loaded_security_state", {})
+                changed = False
+                for field in relevant:
+                    # A full save of stale profile data must not undo a newer
+                    # password/identity change made through another instance.
+                    explicitly_changed = field in loaded and getattr(self, field) != loaded[field]
+                    if field not in loaded and update_fields is not None and field not in self.get_deferred_fields():
+                        explicitly_changed = True
+                    if explicitly_changed:
+                        changed = changed or previous[field] != getattr(self, field)
+                    else:
+                        setattr(self, field, previous[field])
+                self.auth_version = previous["auth_version"] + int(changed)
+                if changed and update_fields is not None:
+                    kwargs["update_fields"] = set(update_fields) | {"auth_version"}
+            result = super().save(*args, **kwargs)
+            self._loaded_security_state = {field: getattr(self, field) for field in security_fields if field not in self.get_deferred_fields()}
+            return result
+
+    def invalidate_sessions(self):
+        """Atomically revoke all access and refresh sessions for this account."""
+        type(self)._base_manager.filter(pk=self.pk).update(auth_version=F("auth_version") + 1)
+        self.refresh_from_db(fields=["auth_version"])
 
 
 class Profile(models.Model):
@@ -210,6 +272,7 @@ class OTP(models.Model):
     class Meta:
         verbose_name = "OTP"
         verbose_name_plural = "OTPs"
+        constraints = [models.UniqueConstraint(fields=["email"], condition=models.Q(is_used=False), name="accounts_otp_one_unused_per_email")]
         indexes = [
             models.Index(fields=["email", "created_at"]),
         ]
@@ -228,24 +291,20 @@ class OTP(models.Model):
         """Generate a new OTP for an email address."""
         normalized_email = email.strip().lower()
 
-        cls.objects.filter(
-        email=normalized_email,
-        is_used=False,
-    ).update(is_used=True)
-
-        code = "".join(str(secrets.randbelow(10)) for _ in range(6))
-
-        expires_at = timezone.now() + timedelta(
-            seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)
-        )
-
-        otp = cls.objects.create(
-            email=normalized_email,
-            code=code,
-            expires_at=expires_at,
-        )
-        
-        return otp
+        # The unique partial index serializes even a first issuance, where
+        # there is no existing row to lock. Retry a competing insertion.
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    cls.objects.filter(email=normalized_email, is_used=False).update(is_used=True)
+                    return cls.objects.create(
+                        email=normalized_email,
+                        code="".join(str(secrets.randbelow(10)) for _ in range(6)),
+                        expires_at=timezone.now() + timedelta(seconds=getattr(settings, "OTP_CODE_EXPIRY_SECONDS", 120)),
+                    )
+            except IntegrityError:
+                if attempt == 2:
+                    raise
 
     @classmethod
     def verify_otp(cls, email, code):
@@ -272,8 +331,10 @@ class OTP(models.Model):
             if otp.is_expired:
                 return False, "OTP has expired", None
 
+            consumed = cls.objects.filter(pk=otp.pk, is_used=False, expires_at__gt=timezone.now()).update(is_used=True)
+            if not consumed:
+                return False, "Invalid OTP code", None
             otp.is_used = True
-            otp.save(update_fields=["is_used"])
 
             return True, "OTP verified successfully", otp
 
@@ -360,61 +421,50 @@ class Seller(models.Model):
             self.store_slug = slug
         super().save(*args, **kwargs)
 
-    def approve(self, admin_user):
-        """Approve seller application"""
-        self.status = self.StatusChoices.APPROVED
-        self.verified_by = admin_user
-        self.verified_at = timezone.now()
-        self.rejection_reason = ""
-        self.save(
-            update_fields=[
-                "status",
-                "verified_by",
-                "verified_at",
-                "rejection_reason",
-                "updated_at",
-            ]
-        )
-
-        self.user.is_seller = True
-        self.user.save(update_fields=["is_seller"])
-
+    def _decide_application(self, admin_user, *, approve, reason=""):
         from apps.rbac.models import Role
-        from apps.rbac.utils import assign_role
+        from apps.rbac.utils import assign_role, has_permission, remove_role
 
-        try:
-            vendor_role = Role.objects.get(name="vendor")
-            assign_role(self.user, vendor_role, admin_user)
+        permission = "approve_seller" if approve else "reject_seller"
+        if not has_permission(admin_user, permission):
+            raise PermissionDenied("Seller decision permission required.")
+        if not approve and (not isinstance(reason, str) or len(reason.strip()) < 3 or len(reason) > 2000):
+            raise ValidationError("A rejection reason between 3 and 2000 characters is required.")
 
-        except Role.DoesNotExist:
-            pass
+        with transaction.atomic():
+            # Checkout uses the same User -> Seller order. NO KEY UPDATE permits
+            # concurrent foreign-key references without weakening row exclusion.
+            user = User.objects.all_with_deleted().select_for_update(no_key=True).get(pk=self.user_id)
+            seller = type(self).objects.select_for_update(no_key=True).get(pk=self.pk)
+            if seller.status != self.StatusChoices.PENDING:
+                raise ValidationError("Only pending seller applications can be decided.")
+            if approve and (not user.is_active or user.is_deleted):
+                raise ValidationError("An unavailable account cannot become a seller.")
+            try:
+                vendor_role = Role.objects.get(name="vendor")
+            except Role.DoesNotExist as exc:
+                raise ValidationError("Vendor role is not configured; no seller state was changed.") from exc
+
+            seller.status = self.StatusChoices.APPROVED if approve else self.StatusChoices.REJECTED
+            seller.verified_by = admin_user
+            seller.verified_at = timezone.now()
+            seller.rejection_reason = "" if approve else reason.strip()
+            seller.save(update_fields=["status", "verified_by", "verified_at", "rejection_reason", "updated_at"])
+            user.is_seller = approve
+            user.save(update_fields=["is_seller"])
+            if approve:
+                assign_role(user, vendor_role, admin_user)
+            else:
+                remove_role(user, vendor_role)
+            self.refresh_from_db()
+
+    def approve(self, admin_user):
+        """Atomically approve a pending application and grant its vendor role."""
+        return self._decide_application(admin_user, approve=True)
 
     def reject(self, admin_user, reason):
-        """Reject seller application"""
-        self.status = self.StatusChoices.REJECTED
-        self.verified_by = admin_user
-        self.rejection_reason = reason
-        self.save(
-            update_fields=[
-                "status",
-                "verified_by",
-                "rejection_reason",
-                "updated_at",
-            ]
-        )
-
-        self.user.is_seller = False
-        self.user.save(update_fields=["is_seller"])
-
-        from apps.rbac.models import Role
-        from apps.rbac.utils import remove_role
-
-        try:
-            vendor_role = Role.objects.get(name="vendor")
-            remove_role(self.user, vendor_role)
-
-        except Role.DoesNotExist:
-            pass
+        """Atomically reject a pending application and revoke its vendor role."""
+        return self._decide_application(admin_user, approve=False, reason=reason)
 
     @property
     def is_verified(self):

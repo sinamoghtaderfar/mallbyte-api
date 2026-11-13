@@ -243,8 +243,13 @@ class Product(models.Model):
 
     @property
     def available_stock(self):
-        """Available stock across all warehouses."""
-        return self.total_stock - self.reserved_stock
+        """Unreserved stock in active warehouses eligible for checkout."""
+        if hasattr(self, "_catalog_available"):
+            return self._catalog_available
+        result = self.stock_items.filter(warehouse__is_active=True).aggregate(
+            total=models.Sum(models.F("quantity") - models.F("reserved_quantity")),
+        )
+        return result["total"] or 0
 
 
     @property

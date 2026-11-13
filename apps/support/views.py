@@ -1,11 +1,12 @@
-from django.contrib.auth import get_user_model
-from django.http import FileResponse, Http404
-from django.utils.http import content_disposition_header
-from apps.support.attachment_validation import SUPPORT_ATTACHMENT_MIME_TYPES
 from pathlib import Path
-from django.db.models import Count, Q
+
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
+from django.http import FileResponse, Http404
 from django.utils import timezone
-from rest_framework import status, viewsets
+from django.utils.http import content_disposition_header
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import (
     FormParser,
@@ -14,6 +15,7 @@ from rest_framework.parsers import (
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.support.attachment_validation import SUPPORT_ATTACHMENT_MIME_TYPES
 from apps.support.models import (
     SupportTag,
     SupportTicket,
@@ -25,6 +27,7 @@ from apps.support.notifications import (
     create_support_notification,
 )
 from apps.support.permissions import (
+    VIEW_SUPPORT_INTERNAL_NOTES,
     CanAccessSupportAttachments,
     CanAssignSupportTickets,
     CanChangeSupportPriority,
@@ -35,7 +38,7 @@ from apps.support.permissions import (
     CanRespondToSupportTicket,
     CanViewSupportAuditLogs,
     IsTicketParticipantOrSupportStaff,
-    can_be_assigned_support_ticket,
+    has_support_permission,
     is_support_staff,
 )
 from apps.support.serializers import (
@@ -44,6 +47,7 @@ from apps.support.serializers import (
     TicketAssignSerializer,
     TicketAttachmentSerializer,
     TicketAuditLogSerializer,
+    TicketMessageSerializer,
     TicketPrioritySerializer,
     TicketReplySerializer,
     TicketTagSerializer,
@@ -147,8 +151,23 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
         return [permission() for permission in permission_classes]
 
+    def get_object(self):
+        if self.request.method == "POST":
+            # Every detail mutation below is atomic. Lock only the ticket row,
+            # avoiding nullable joined rows and FK key-share deadlocks.
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update(no_key=True, of=("self",))
+            from django.shortcuts import get_object_or_404
+            ticket = get_object_or_404(queryset, pk=self.kwargs["pk"])
+            self.check_object_permissions(self.request, ticket)
+            return ticket
+        return super().get_object()
+
     def get_queryset(self):
         user = self.request.user
+        messages = TicketMessage.objects.select_related("sender").order_by("-created_at", "-pk")
+        if not has_support_permission(user, VIEW_SUPPORT_INTERNAL_NOTES):
+            messages = messages.filter(is_internal_note=False)
+        attachments = TicketAttachment.objects.select_related("uploaded_by").order_by("-created_at", "-pk")
 
         queryset = (
             SupportTicket.objects.select_related(
@@ -158,7 +177,11 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
                 "product",
                 "return_request",
             )
-            .prefetch_related("messages")
+            .prefetch_related(
+                "tags",
+                Prefetch("messages", queryset=messages[:51], to_attr="visible_messages"),
+                Prefetch("attachments", queryset=attachments[:51], to_attr="visible_attachments"),
+            )
             .all()
         )
 
@@ -170,8 +193,29 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         category = self.request.query_params.get("category")
         assigned_to = self.request.query_params.get("assigned_to")
         customer = self.request.query_params.get("customer")
+        if customer:
+            try:
+                customer = int(customer)
+                if customer < 1:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise serializers.ValidationError({"customer": "Expected a positive integer."}) from exc
         order = self.request.query_params.get("order")
+        if order:
+            try:
+                order = int(order)
+                if order < 1:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise serializers.ValidationError({"order": "Expected a positive integer."}) from exc
         product = self.request.query_params.get("product")
+        if product:
+            try:
+                product = int(product)
+                if product < 1:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise serializers.ValidationError({"product": "Expected a positive integer."}) from exc
         ordering = self.request.query_params.get("ordering")
 
         if status_filter:
@@ -193,6 +237,12 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             if assigned_to == "me":
                 queryset = queryset.filter(assigned_to=user)
             elif is_support_staff(user):
+                try:
+                    assigned_to = int(assigned_to)
+                    if assigned_to < 1:
+                        raise ValueError
+                except (TypeError, ValueError) as exc:
+                    raise serializers.ValidationError({"assigned_to": "Expected a positive integer or 'me'."}) from exc
                 queryset = queryset.filter(assigned_to_id=assigned_to)
 
         if customer and is_support_staff(user):
@@ -215,6 +265,42 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             queryset = queryset.order_by(ordering)
 
         return queryset
+
+    def refresh_ticket_projection(self, ticket):
+        # Mutations may add messages/tags/attachments after the initial prefetch.
+        # Refresh once rather than serializing a stale related-object cache.
+        return self.get_queryset().get(pk=ticket.pk)
+
+    def get_serializer(self, *args, **kwargs):
+        if args and isinstance(args[0], SupportTicket) and self.request.method == "POST" and args[0].pk:
+            args = (self.refresh_ticket_projection(args[0]), *args[1:])
+        return super().get_serializer(*args, **kwargs)
+
+    @action(detail=True, methods=["get"], url_path="messages")
+    def messages(self, request, pk=None):
+        ticket = self.get_object()
+        queryset = ticket.messages.select_related("sender").order_by("created_at", "pk")
+        if not has_support_permission(request.user, VIEW_SUPPORT_INTERNAL_NOTES):
+            queryset = queryset.filter(is_internal_note=False)
+        page = self.paginate_queryset(queryset)
+        serializer = TicketMessageSerializer(page if page is not None else queryset[:50], many=True)
+        return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
+
+    def bounded_collection_response(self, queryset, serializer_class):
+        # Keep the existing array body; expose deterministic next/previous pages
+        # through headers so collection size remains bounded.
+        page = self.paginate_queryset(queryset)
+        serializer = serializer_class(page if page is not None else queryset[:50], many=True, context={"request": self.request})
+        response = Response(serializer.data)
+        if page is not None:
+            response["X-Total-Count"] = str(self.paginator.page.paginator.count)
+            links = []
+            for relation, url in (("next", self.paginator.get_next_link()), ("prev", self.paginator.get_previous_link())):
+                if url:
+                    links.append(f'<{url}>; rel="{relation}"')
+            if links:
+                response["Link"] = ", ".join(links)
+        return response
 
     @action(
         detail=False,
@@ -319,7 +405,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         try:
             stream = attachment.file.open("rb")
         except (FileNotFoundError, OSError, ValueError):
-            raise Http404
+            raise Http404 from None
 
         name = Path(attachment.original_filename).name or "attachment"
         extension = Path(name).suffix.lower()
@@ -341,6 +427,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             FormParser,
         ],
     )
+    @transaction.atomic
     def attachments(
         self,
         request,
@@ -349,18 +436,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         ticket = self.get_object()
 
         if request.method == "GET":
-            serializer = TicketAttachmentSerializer(
-                ticket.attachments.all(),
-                many=True,
-                context={
-                    "request": request,
-                },
-            )
-
-            return Response(
-                serializer.data,
-                status=status.HTTP_200_OK,
-            )
+            return self.bounded_collection_response(ticket.attachments.select_related("uploaded_by").order_by("-created_at", "-pk"), TicketAttachmentSerializer)
 
         if ticket.status == SupportTicket.StatusChoices.CLOSED:
             return Response(
@@ -383,7 +459,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
         uploaded_file = serializer.validated_data["file"]
 
-        attachment = TicketAttachment.objects.create(
+        attachment = TicketAttachment(
             ticket=ticket,
             uploaded_by=request.user,
             file=uploaded_file,
@@ -403,17 +479,24 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
             ),
         )
 
-        TicketAuditLog.log(
-            ticket=ticket,
-            actor=request.user,
-            action=(TicketAuditLog.ActionChoices.ATTACHMENT_ADDED),
-            description="Attachment uploaded.",
-            metadata={
-                "attachment_id": (attachment.pk),
-                "filename": (attachment.original_filename),
-                "size": attachment.size,
-            },
-        )
+        try:
+            attachment.save()
+            TicketAuditLog.log(
+                ticket=ticket,
+                actor=request.user,
+                action=(TicketAuditLog.ActionChoices.ATTACHMENT_ADDED),
+                description="Attachment uploaded.",
+                metadata={
+                    "attachment_id": (attachment.pk),
+                    "filename": (attachment.original_filename),
+                    "size": attachment.size,
+                },
+            )
+
+        except Exception:
+            if attachment.file and attachment.file.name and attachment.file._committed:
+                attachment.file.storage.delete(attachment.file.name)
+            raise
 
         response_serializer = TicketAttachmentSerializer(
             attachment,
@@ -432,6 +515,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="add-tag",
     )
+    @transaction.atomic
     def add_tag(
         self,
         request,
@@ -467,6 +551,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="remove-tag",
     )
+    @transaction.atomic
     def remove_tag(
         self,
         request,
@@ -509,21 +594,14 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     ):
         ticket = self.get_object()
 
-        serializer = TicketAuditLogSerializer(
-            ticket.audit_logs.all(),
-            many=True,
-        )
-
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
+        return self.bounded_collection_response(ticket.audit_logs.select_related("actor").order_by("-created_at", "-pk"), TicketAuditLogSerializer)
 
     @action(
         detail=True,
         methods=["post"],
         url_path="reply",
     )
+    @transaction.atomic
     def reply(
         self,
         request,
@@ -590,6 +668,9 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
                 ticket.status = SupportTicket.StatusChoices.PENDING
 
             update_fields.append("status")
+            ticket.resolved_at = None
+            ticket.closed_at = None
+            update_fields.extend(["resolved_at", "closed_at"])
 
         ticket.save(update_fields=update_fields)
 
@@ -621,40 +702,24 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         url_path="agents",
     )
     def agents(self, request):
-        users = (
-            User.objects.filter(is_active=True)
-            .only(
-                "id",
-                "email",
-                "full_name",
-                "is_superuser",
-            )
-            .order_by(
-                "full_name",
-                "email",
-            )
-        )
+        from apps.rbac.models import UserRole
+        from apps.support.serializers import SupportAgentSerializer
 
-        data = [
-            {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-            }
-            for user in users
-            if can_be_assigned_support_ticket(user)
-        ]
-
-        return Response(
-            data,
-            status=status.HTTP_200_OK,
+        assignments = UserRole.objects.filter(user_id=OuterRef("pk"), is_active=True).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
         )
+        users = User.objects.filter(is_active=True).annotate(
+            can_view=Exists(assignments.filter(role__role_permissions__permission__codename="view_all_support_tickets")),
+            can_reply=Exists(assignments.filter(role__role_permissions__permission__codename="reply_support_tickets")),
+        ).filter(Q(is_superuser=True) | Q(can_view=True, can_reply=True)).only("id", "email", "full_name").order_by("full_name", "email", "pk")
+        return self.bounded_collection_response(users, SupportAgentSerializer)
 
     @action(
         detail=True,
         methods=["post"],
         url_path="assign",
     )
+    @transaction.atomic
     def assign(
         self,
         request,
@@ -702,6 +767,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="priority",
     )
+    @transaction.atomic
     def priority(
         self,
         request,
@@ -749,12 +815,15 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="resolve",
     )
+    @transaction.atomic
     def resolve(
         self,
         request,
         pk=None,
     ):
         ticket = self.get_object()
+        if ticket.status == SupportTicket.StatusChoices.RESOLVED:
+            return Response(self.get_serializer(ticket).data, status=status.HTTP_200_OK)
 
         ticket.mark_resolved()
 
@@ -782,12 +851,15 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="close",
     )
+    @transaction.atomic
     def close(
         self,
         request,
         pk=None,
     ):
         ticket = self.get_object()
+        if ticket.status == SupportTicket.StatusChoices.CLOSED:
+            return Response(self.get_serializer(ticket).data, status=status.HTTP_200_OK)
 
         ticket.close()
 
@@ -815,12 +887,15 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="reopen",
     )
+    @transaction.atomic
     def reopen(
         self,
         request,
         pk=None,
     ):
         ticket = self.get_object()
+        if ticket.status == SupportTicket.StatusChoices.OPEN:
+            return Response(self.get_serializer(ticket).data, status=status.HTTP_200_OK)
 
         ticket.reopen()
 

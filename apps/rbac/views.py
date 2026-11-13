@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from rest_framework import generics, status, viewsets
+from rest_framework import generics, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -26,6 +26,10 @@ from .utils import (
 )
 
 User = get_user_model()
+
+
+class RolePermissionIdSerializer(serializers.Serializer):
+    permission_id = serializers.IntegerField(min_value=1)
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -97,7 +101,11 @@ class RoleViewSet(viewsets.ModelViewSet):
     def add_permission(self, request, pk=None):
         """Add a permission to a role."""
         role = self.get_object()
-        permission_id = request.data.get("permission_id")
+        if role.is_system_role:
+            return Response({"detail": "System role permissions are protected."}, status=status.HTTP_403_FORBIDDEN)
+        payload = RolePermissionIdSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        permission_id = payload.validated_data["permission_id"]
 
         try:
             permission = Permission.objects.get(id=permission_id)
@@ -136,7 +144,11 @@ class RoleViewSet(viewsets.ModelViewSet):
     def remove_permission(self, request, pk=None):
         """Remove a permission from a role."""
         role = self.get_object()
-        permission_id = request.data.get("permission_id")
+        if role.is_system_role:
+            return Response({"detail": "System role permissions are protected."}, status=status.HTTP_403_FORBIDDEN)
+        payload = RolePermissionIdSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        permission_id = payload.validated_data["permission_id"]
 
         try:
             permission = Permission.objects.get(id=permission_id)
@@ -191,7 +203,7 @@ class UserRoleViewSet(viewsets.ModelViewSet):
             "user",
             "role",
             "assigned_by",
-        ).all()
+        ).order_by("-assigned_at", "-pk")
 
         user_id = self.request.query_params.get("user_id")
         if user_id:
