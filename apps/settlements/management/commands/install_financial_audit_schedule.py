@@ -1,7 +1,7 @@
 """Opt-in setup: python manage.py install_financial_audit_schedule --hour 3."""
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django_celery_beat.models import CrontabSchedule, PeriodicTask
+from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
 
 class Command(BaseCommand):
@@ -31,6 +31,13 @@ class Command(BaseCommand):
                 "enabled": not options["disable"],
                 "args": "[]", "kwargs": "{}",
             },
+        )
+        recovery_interval, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
+        PeriodicTask.objects.update_or_create(
+            name="MallByte financial reconciliation recovery",
+            defaults={"task": "apps.settlements.tasks.recover_financial_audits", "interval": recovery_interval,
+                      "crontab": None, "solar": None, "clocked": None, "enabled": not options["disable"],
+                      "args": "[]", "kwargs": "{}"},
         )
         self.stdout.write(self.style.SUCCESS(
             f"Scheduled audit: {'enabled' if task.enabled else 'disabled'} at {h:02}:{m:02} {settings.TIME_ZONE}"

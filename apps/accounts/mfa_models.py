@@ -74,7 +74,10 @@ class AdminMFAChallenge(models.Model):
 
     @classmethod
     def issue(cls, user):
-        token = secrets.token_urlsafe(32)
+        # The full opaque value is hashed below. Binding its prefix to the
+        # security epoch invalidates pending first factors after session
+        # revocation without changing the database schema.
+        token = f"{user.auth_version}.{secrets.token_urlsafe(32)}"
         cls.objects.create(
             user=user,
             token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),

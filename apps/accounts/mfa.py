@@ -12,8 +12,8 @@ from cryptography.fernet import Fernet
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 
-from .mfa_models import AdminMFADevice
 from .auth_tokens import issue_user_tokens
+from .mfa_models import AdminMFADevice
 
 
 def is_privileged(user):
