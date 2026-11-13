@@ -15,7 +15,7 @@ from apps.support.models import SupportTicket
 
 from .models import AdminLog, Permission, Role, RolePermission
 from .permissions import IsSuperAdmin
-from .serializers import PermissionSerializer, RoleSerializer
+from .serializers import ConsoleRolePermissionSerializer, PermissionSerializer, RoleSerializer
 from .utils import clear_role_permissions_cache, log_admin_action
 
 User = get_user_model()
@@ -146,14 +146,12 @@ class ConsoleRolePermissionView(APIView):
             return Response({"detail": "Role not found."}, status=404)
         if role.is_system_role:
             return Response({"detail": "System role permissions are protected."}, status=403)
-        permission_id = request.data.get("permission_id")
-        from .models import Permission
-        permission = Permission.objects.filter(pk=permission_id).first()
+        payload = ConsoleRolePermissionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        permission = Permission.objects.filter(pk=payload.validated_data["permission_id"]).first()
         if not permission:
             raise ValidationError({"permission_id": "Invalid permission."})
-        enabled = request.data.get("enabled")
-        if not isinstance(enabled, bool):
-            raise ValidationError({"enabled": "Expected boolean."})
+        enabled = payload.validated_data["enabled"]
         with transaction.atomic():
             if enabled:
                 RolePermission.objects.get_or_create(role=role, permission=permission)
