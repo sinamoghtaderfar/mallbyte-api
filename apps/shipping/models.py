@@ -434,7 +434,18 @@ class Shipment(models.Model):
                 message=note or "Shipment cancelled.",
                 created_by=user,
             )
-            if shipment.seller_fulfillment_id:
+            # A stale parcel can outlive a refund, order cancellation or
+            # completed delivery. Cancel the parcel without reopening the order
+            # or rewriting the seller's completed fulfillment snapshot.
+            if (
+                shipment.seller_fulfillment_id
+                and order.payment_status == Order.PaymentStatusChoices.PAID
+                and order.status in {
+                    Order.StatusChoices.PAID,
+                    Order.StatusChoices.PROCESSING,
+                    Order.StatusChoices.SHIPPED,
+                }
+            ):
                 self._set_seller_status(
                     shipment,
                     Order.StatusChoices.PAID,

@@ -1,10 +1,10 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
-from django.urls import reverse
-from apps.support.attachment_validation import validate_support_attachment
 
+from apps.support.attachment_validation import validate_support_attachment
 from apps.support.models import (
     SupportTag,
     SupportTicket,
@@ -165,10 +165,21 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
-    attachments = TicketAttachmentSerializer(
-        many=True,
-        read_only=True,
-    )
+    attachments = serializers.SerializerMethodField()
+    messages_truncated = serializers.SerializerMethodField()
+    attachments_truncated = serializers.SerializerMethodField()
+
+    def get_attachments(self, obj):
+        attachments = getattr(obj, "visible_attachments", None)
+        if attachments is None:
+            attachments = list(obj.attachments.select_related("uploaded_by").all()[:51])
+        return TicketAttachmentSerializer(attachments[:50], many=True, context=self.context).data
+
+    def get_messages_truncated(self, obj):
+        return len(getattr(obj, "visible_messages", [])) > 50
+
+    def get_attachments_truncated(self, obj):
+        return len(getattr(obj, "visible_attachments", [])) > 50
 
     class Meta:
         model = SupportTicket
@@ -190,6 +201,8 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             "resolved_at",
             "closed_at",
             "messages",
+            "messages_truncated",
+            "attachments_truncated",
             "initial_message",
             "created_at",
             "updated_at",
@@ -219,24 +232,14 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         ]
 
     def get_messages(self, obj):
-        request = self.context.get("request")
-        messages = obj.messages.all()
-
-        can_view_internal_notes = bool(
-            request
-            and has_support_permission(
-                request.user,
-                VIEW_SUPPORT_INTERNAL_NOTES,
-            )
-        )
-
-        if not can_view_internal_notes:
-            messages = messages.filter(is_internal_note=False)
-
-        return TicketMessageSerializer(
-            messages,
-            many=True,
-        ).data
+        messages = getattr(obj, "visible_messages", None)
+        if messages is None:
+            messages = obj.messages.select_related("sender").order_by("-created_at", "-pk")
+            request = self.context.get("request")
+            if not request or not has_support_permission(request.user, VIEW_SUPPORT_INTERNAL_NOTES):
+                messages = messages.filter(is_internal_note=False)
+            messages = list(messages[:51])
+        return TicketMessageSerializer(list(reversed(messages[:50])), many=True).data
 
     def validate(self, attrs):
         request = self.context.get("request")
@@ -362,3 +365,9 @@ class TicketAssignSerializer(serializers.Serializer):
 
 class TicketPrioritySerializer(serializers.Serializer):
     priority = serializers.ChoiceField(choices=SupportTicket.PriorityChoices.choices)
+
+
+class SupportAgentSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    email = serializers.EmailField()
+    full_name = serializers.CharField()

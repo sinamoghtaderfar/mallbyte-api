@@ -1,4 +1,6 @@
 """Persistence for automated, read-only financial audits."""
+import uuid
+
 from django.db import models
 
 
@@ -20,6 +22,10 @@ class FinancialAuditRun(models.Model):
     findings_count = models.PositiveIntegerField(default=0)
     summary = models.JSONField(default=dict)
     error = models.TextField(blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    sample_limit = models.PositiveSmallIntegerField(default=20)
+    started_at = models.DateTimeField(null=True, blank=True)
+    execution_token = models.UUIDField(default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 

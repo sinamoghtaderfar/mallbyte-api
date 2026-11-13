@@ -123,7 +123,7 @@ class MarketplaceCheckoutJourneyTests(APITestCase):
         self.client.force_authenticate(user=self.seller)
         seller_orders = self.client.get(reverse("order-seller-orders"))
         self.assertEqual(seller_orders.status_code, status.HTTP_200_OK, seller_orders.data)
-        self.assertIn(order.pk, [row["id"] for row in seller_orders.data])
+        self.assertIn(order.pk, [row["id"] for row in seller_orders.data["results"]])
 
         self.client.force_authenticate(user=self.customer)
         seller_blocked = self.client.get(reverse("order-seller-orders"))

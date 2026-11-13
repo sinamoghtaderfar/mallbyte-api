@@ -2,13 +2,13 @@
 
 Run after deploying the private storage change. Keep a backup until verified.
 """
-import os
 import shutil
 from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from apps.support.management.commands.migrate_private_media import digest
 from apps.support.models import TicketAttachment
 
 
@@ -22,8 +22,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         source_root = Path(settings.MEDIA_ROOT).resolve()
         target_root = Path(settings.SUPPORT_PRIVATE_MEDIA_ROOT).resolve()
-        if os.path.commonpath((str(source_root), str(target_root))) == str(source_root):
-            raise CommandError("Private root must be outside public media.")
+        if target_root.is_relative_to(source_root) or source_root.is_relative_to(target_root):
+            raise CommandError("Public and private media roots must be separate.")
         if options["purge_public"] and not options["apply"]:
             raise CommandError("--purge-public requires --apply.")
 
@@ -46,7 +46,7 @@ class Command(BaseCommand):
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists():
                 shutil.copy2(source, target)
-            if not target.is_file() or source.stat().st_size != target.stat().st_size:
+            if not target.is_file() or digest(source) != digest(target):
                 raise CommandError(f"File verification failed for attachment id={obj.pk}")
             if options["purge_public"]:
                 source.unlink()

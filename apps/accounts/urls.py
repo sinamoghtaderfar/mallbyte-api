@@ -1,8 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .mfa_views import AdminMFASetupView, AdminMFACompleteView, AdminMFAVerifyView
-
+from .mfa_views import AdminMFACompleteView, AdminMFASetupView, AdminMFAVerifyView
 from .views import (
     AddressViewSet,
     AdminDeleteUserView,
@@ -15,6 +14,7 @@ from .views import (
     DeleteAccountView,
     EmailVerifyConfirmView,
     EmailVerifyRequestView,
+    LogoutView,
     OTPRequestView,
     OTPVerifyView,
     PasswordResetRequestView,
@@ -25,7 +25,6 @@ from .views import (
     SellerDashboardView,
     SellerStatusView,
     SellerStoreView,
-    LogoutView
 )
 
 router = DefaultRouter()
