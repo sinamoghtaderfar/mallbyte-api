@@ -15,6 +15,7 @@ from apps.returns.models import (
     ReturnShipment,
     ReturnStatusHistory,
 )
+from apps.returns.refund_amounts import merchandise_net_by_item, refund_amount_for_quantity
 
 
 def is_admin_user(user):
@@ -113,6 +114,11 @@ def create_return_request(
     if not items:
         raise ValidationError("At least one return item is required.")
 
+    item_ids = [item["order_item"].pk for item in items]
+    if len(item_ids) != len(set(item_ids)):
+        raise ValidationError("Each order item may appear only once in a return request.")
+    net_amounts = merchandise_net_by_item(order)
+
     return_request = ReturnRequest.objects.create(
         customer=customer,
         order=order,
@@ -165,7 +171,9 @@ def create_return_request(
                 f"You can return at most {available_quantity} item(s) for {order_item.product_name}."
             )
 
-        requested_refund_amount = order_item.unit_price * quantity
+        requested_refund_amount = refund_amount_for_quantity(
+            order_item, quantity, net_amounts[order_item.pk],
+        )
         total_requested_amount += requested_refund_amount
 
         ReturnItem.objects.create(
@@ -420,6 +428,8 @@ def mark_return_item_received(*, return_request, user, note=""):
 
 @transaction.atomic
 def mark_return_refunded(*, return_request, user, note=""):
+    # Same lock order as verified financial posting: Order -> Return.
+    Order.objects.select_for_update().get(pk=return_request.order_id)
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
     if not can_manage(user, "returns"):
@@ -429,21 +439,24 @@ def mark_return_refunded(*, return_request, user, note=""):
         ReturnRequest.Status.ITEM_RECEIVED,
         ReturnRequest.Status.INSPECTING,
         ReturnRequest.Status.REFUND_PENDING,
+        ReturnRequest.Status.REFUNDED,
     ]:
         raise ValidationError("This return request cannot be marked as refunded.")
 
-    from django.conf import settings
-    if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
-        from django.db.models import Sum
+    from apps.settlements.models import ConfirmedRefund
 
-        from apps.settlements.models import ConfirmedRefund
-        verified = ConfirmedRefund.objects.filter(
-            return_request_id=return_request.pk,
-        ).aggregate(amount=Sum("amount"))["amount"] or Decimal("0")
-        if verified < return_request.total_approved_amount:
-            raise ValidationError(
-                "The approved return amount has not been fully confirmed by the payment processor."
-            )
+    if return_request.total_approved_amount <= 0:
+        raise ValidationError("A zero-value return cannot be recorded as a monetary refund.")
+    verified = ConfirmedRefund.objects.filter(
+        return_request_id=return_request.pk,
+        payment__order_id=return_request.order_id,
+        payment__status__in=["success", "refunded"],
+    ).aggregate(amount=Sum("amount"))["amount"] or Decimal("0")
+    if verified != return_request.total_approved_amount:
+        raise ValidationError("The approved return amount must match verified refund evidence.")
+
+    if return_request.status == ReturnRequest.Status.REFUNDED:
+        return return_request
 
     old_status = return_request.status
 
