@@ -1,10 +1,10 @@
 """Pure Python, offline tests for host runner. No Docker invocation occurs."""
 import importlib.util
 from pathlib import Path
-from unittest import TestCase
-from unittest.mock import patch
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest import TestCase
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("obs_quality_host_runner", Path(__file__).with_name("host_runner.py"))
 runner = importlib.util.module_from_spec(spec)
@@ -26,9 +26,9 @@ class HostRunnerSafetyTests(TestCase):
                  patch.object(runner.shutil, "which", return_value="/usr/bin/docker"), \
                  patch.object(runner, "ROOT", root), \
                  patch.object(runner, "Path", side_effect=lambda _: SimpleNamespace(exists=lambda: False)), \
-                 patch("sys.argv", ["host_runner.py", "--dry-run"]):
+                 patch("sys.argv", ["host_runner.py", "--environment", "staging", "--dry-run"]):
                 runner.main()
-            bridge.assert_called_once_with("peek")
+            bridge.assert_called_once_with("peek", environment="staging")
             call.assert_not_called()
 
     def test_success_path_uses_fixed_compose_target_and_reports_token(self):
@@ -43,6 +43,7 @@ class HostRunnerSafetyTests(TestCase):
                 return type("R", (), {"returncode": 0, "stdout": "true\n"})()
             return Result()
         def fake_bridge(verb, *args, **kwargs):
+            self.assertEqual(kwargs["environment"], "production")
             if verb == "claim":
                 return {"operation": {"id": "safe-uuid", "target": "celery_beat"}, "token": "FAKE-ONE-TIME-TOKEN"}
             if verb == "complete":
@@ -61,8 +62,15 @@ class HostRunnerSafetyTests(TestCase):
                  patch.object(runner, "Path", side_effect=lambda _: SimpleNamespace(exists=lambda: False)), \
                  patch.object(runner, "LOCK_DIR", lock_dir), \
                  patch.object(runner, "LOCK", lock_dir / "test.lock"), \
-                 patch("sys.argv", ["host_runner.py"]):
+                 patch("sys.argv", ["host_runner.py", "--environment", "production"]):
                 runner.main()
         restart_commands = [args for args, _ in calls if "restart" in args]
         self.assertEqual(len(restart_commands), 1)
         self.assertEqual(restart_commands[0][-2:], ["restart", "celery_beat"])
+        self.assertEqual(restart_commands[0][:5], ["docker", "compose", "-f", "compose.production.yaml", "restart"])
+
+    def test_environment_is_explicit_and_uses_only_fixed_files(self):
+        self.assertEqual(runner.compose_command("staging"), ["docker", "compose", "-f", "compose.staging.yaml"])
+        self.assertNotIn("compose.dev.yaml", runner.compose_command("production"))
+        with patch("sys.argv", ["host_runner.py", "--dry-run"]), self.assertRaises(SystemExit):
+            runner.main()

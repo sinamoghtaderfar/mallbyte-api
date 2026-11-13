@@ -1,21 +1,23 @@
 import csv
+import zipfile
 
 import pandas as pd
-from django.db.models import F, IntegerField, Prefetch, Q, Sum, Value
-from django.db.models.functions import Coalesce
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
+from django.db import transaction
+from django.db.models import F, Prefetch, Q
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from openpyxl import Workbook
-from rest_framework import filters, generics, status, viewsets
+from rest_framework import filters, generics, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from apps.products.services import create_product_notification
+from apps.common.exports import safe_spreadsheet_value
+from apps.products.services import create_product_notification, requeue_product_for_review
 from apps.rbac.permissions import IsProductAdmin, IsVendor, user_has_active_role
 
 from .filters import ProductFilter
@@ -25,12 +27,14 @@ from .models import (
     Brand,
     Category,
     Product,
+    ProductAttribute,
     ProductImage,
     ProductVariant,
     RecentlyViewed,
     Tag,
     Wishlist,
 )
+from .querysets import catalog_queryset, main_image_prefetch
 from .serializers import (
     AttributeSerializer,
     AttributeValueSerializer,
@@ -44,7 +48,9 @@ from .serializers import (
     RecentlyViewedSerializer,
     TagSerializer,
     WishlistSerializer,
+    catalog_write,
 )
+
 
 class CatalogOrderingFilter(filters.OrderingFilter):
     """Relevance-first search unless the customer explicitly chooses a sort order."""
@@ -67,13 +73,29 @@ class CategoryViewSet(viewsets.ModelViewSet):
             return [AllowAny()]
         return [IsAuthenticated(), IsProductAdmin()]
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.action in ("list", "retrieve"):
+            children = {}
+            for category in Category.objects.filter(is_active=True).select_related("parent").order_by("order", "pk"):
+                children.setdefault(category.parent_id, []).append(category)
+            context["category_children"] = children
+        return context
+
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = (Category.objects.all() if self.action not in ("list", "retrieve") else super().get_queryset()).select_related("parent")
+        if self.action != "list":
+            return queryset
         parent = self.request.query_params.get("parent")
         if parent == "null" or parent is None:
             queryset = queryset.filter(parent__isnull=True)
         elif parent:
-            queryset = queryset.filter(parent_id=parent)
+            field = serializers.IntegerField(min_value=1, max_value=2 ** 63 - 1)
+            try:
+                parent_id = field.run_validation(parent)
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"parent": exc.detail}) from exc
+            queryset = queryset.filter(parent_id=parent_id)
         return queryset
 
 
@@ -88,6 +110,9 @@ class BrandViewSet(viewsets.ModelViewSet):
         if self.action in ["list", "retrieve"]:
             return [AllowAny()]
         return [IsAuthenticated(), IsProductAdmin()]
+
+    def get_queryset(self):
+        return Brand.objects.all() if self.action not in ("list", "retrieve") else super().get_queryset()
 
 
 # ==================== Attribute Views ====================
@@ -162,6 +187,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         action = getattr(self, "action", None)
+        if action in ("approve", "reject", "feature"):
+            queryset = queryset.select_for_update(of=("self",))
         publicly_visible = Q(
             status=Product.StatusChoices.APPROVED,
             is_active=True,
@@ -171,21 +198,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         if action == "list":
             # One aggregate query plus one image prefetch replaces per-product stock
             # and image lookups. Public visibility is always enforced first.
-            queryset = (
-                queryset.filter(publicly_visible)
-                .select_related("brand", "category")
-                .prefetch_related(
-                    Prefetch(
-                        "images",
-                        queryset=ProductImage.objects.filter(is_main=True).order_by("order", "pk"),
-                        to_attr="_catalog_main_images",
-                    )
-                )
-                .annotate(
-                    _catalog_stock=Coalesce(Sum("stock_items__quantity"), Value(0), output_field=IntegerField()),
-                    _catalog_reserved=Coalesce(Sum("stock_items__reserved_quantity"), Value(0), output_field=IntegerField()),
-                )
-            )
+            queryset = catalog_queryset(queryset.filter(publicly_visible))
             search = self.request.query_params.get("search", "").strip()
             if search:
                 vector = (
@@ -233,6 +246,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def approve(self, request, pk=None):
         product = self.get_object()
 
@@ -251,11 +265,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response({"message": "Product approved successfully"})
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def reject(self, request, pk=None):
         product = self.get_object()
         reason = request.data.get("reason", "No reason provided")
 
         product.status = Product.StatusChoices.REJECTED
+        product.approved_by = None
+        product.approved_at = None
         product.save()
 
         create_product_notification(
@@ -272,6 +289,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response({"message": f"Product rejected. Reason: {reason}"})
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def feature(self, request, pk=None):
         product = self.get_object()
         product.is_featured = not product.is_featured
@@ -280,36 +298,29 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], permission_classes=[AllowAny])
     def featured(self, request):
-        products = Product.objects.filter(
+        products = catalog_queryset(Product.objects.filter(
             is_featured=True,
             status=Product.StatusChoices.APPROVED,
             is_active=True,
-        )
+        ))
+        page = self.paginate_queryset(products)
 
         serializer = ProductListSerializer(
-            products,
+            page if page is not None else products,
             many=True,
             context={"request": request},
         )
 
-        return Response(serializer.data)
+        return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
 
     @action(detail=True, methods=["post"], permission_classes=[AllowAny])
     def add_view(self, request, pk=None):
         product = self.get_object()
-        product.views_count += 1
-        product.save()
+        Product.objects.filter(pk=product.pk).update(views_count=F("views_count") + 1)
+        product.refresh_from_db(fields=["views_count"])
 
         if request.user.is_authenticated:
-            RecentlyViewed.objects.filter(
-                user=request.user,
-                product=product,
-            ).delete()
-
-            RecentlyViewed.objects.create(
-                user=request.user,
-                product=product,
-            )
+            RecentlyViewed.objects.update_or_create(user=request.user, product=product, defaults={"viewed_at": timezone.now()})
 
             recent_count = RecentlyViewed.objects.filter(
                 user=request.user,
@@ -334,7 +345,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not request.user.is_authenticated:
             return Response({"error": "Authentication required"}, status=401)
 
-        recent = RecentlyViewed.objects.filter(user=request.user)[:20]
+        recent = RecentlyViewed.objects.filter(user=request.user, product__status="approved", product__is_active=True).select_related("product").prefetch_related(main_image_prefetch("product__"))[:20]
 
         serializer = RecentlyViewedSerializer(
             recent,
@@ -348,11 +359,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     def related(self, request, pk=None):
         product = self.get_object()
 
-        related = Product.objects.filter(
+        related = catalog_queryset(Product.objects.filter(
             category=product.category,
             status=Product.StatusChoices.APPROVED,
             is_active=True,
-        ).exclude(id=product.id)[:10]
+        ).exclude(id=product.id))[:10]
 
         serializer = ProductListSerializer(
             related,
@@ -367,48 +378,71 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not hasattr(request.user, "seller"):
             return Response({"error": "You are not a seller"}, status=403)
 
-        products = Product.objects.filter(seller=request.user)
+        products = catalog_queryset(Product.objects.filter(seller=request.user))
+        page = self.paginate_queryset(products)
 
         serializer = ProductListSerializer(
-            products,
+            page if page is not None else products,
             many=True,
             context={"request": request},
         )
 
-        return Response(serializer.data)
+        return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
 
 
 # ==================== Product Image Views ====================
 
 
-class ProductImageViewSet(viewsets.ModelViewSet):
+class SellerProductComponentMixin:
+    """Component edits invalidate moderation just like the parent product form."""
+
+    @catalog_write
+    def perform_create(self, serializer):
+        from rest_framework.exceptions import ValidationError
+        try:
+            raw_product_id = self.request.data.get("product")
+            if isinstance(raw_product_id, bool) or isinstance(raw_product_id, float) and not raw_product_id.is_integer():
+                raise ValueError
+            product_id = int(raw_product_id)
+            if not 0 < product_id <= 2 ** 63 - 1:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"product": "A valid product ID is required."}) from exc
+        product = get_object_or_404(Product.objects.select_for_update(), pk=product_id, seller=self.request.user)
+        serializer.save(product=product)
+        requeue_product_for_review(product)
+
+    @catalog_write
+    def perform_update(self, serializer):
+        product = get_object_or_404(Product.objects.select_for_update(), pk=serializer.instance.product_id, seller=self.request.user)
+        serializer.instance = get_object_or_404(self.get_queryset(), pk=serializer.instance.pk)
+        serializer.save()
+        requeue_product_for_review(product)
+
+    @catalog_write
+    def perform_destroy(self, instance):
+        product = get_object_or_404(Product.objects.select_for_update(), pk=instance.product_id, seller=self.request.user)
+        instance = get_object_or_404(self.get_queryset(), pk=instance.pk)
+        instance.delete()
+        requeue_product_for_review(product)
+
+
+class ProductImageViewSet(SellerProductComponentMixin, viewsets.ModelViewSet):
     serializer_class = ProductImageSerializer
     permission_classes = [IsAuthenticated, IsVendor]
 
     def get_queryset(self):
         return ProductImage.objects.filter(product__seller=self.request.user)
 
-    def perform_create(self, serializer):
-        product_id = self.request.data.get("product")
-        product = get_object_or_404(Product, id=product_id, seller=self.request.user)
-        serializer.save(product=product)
-
-
 # ==================== Product Variant Views ====================
 
 
-class ProductVariantViewSet(viewsets.ModelViewSet):
+class ProductVariantViewSet(SellerProductComponentMixin, viewsets.ModelViewSet):
     serializer_class = ProductVariantSerializer
     permission_classes = [IsAuthenticated, IsVendor]
 
     def get_queryset(self):
         return ProductVariant.objects.filter(product__seller=self.request.user)
-
-    def perform_create(self, serializer):
-        product_id = self.request.data.get("product")
-        product = get_object_or_404(Product, id=product_id, seller=self.request.user)
-        serializer.save(product=product)
-
 
 # ==================== Wishlist Views ====================
 
@@ -418,7 +452,7 @@ class WishlistViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Wishlist.objects.filter(user=self.request.user)
+        return Wishlist.objects.filter(user=self.request.user, product__status=Product.StatusChoices.APPROVED, product__is_active=True).select_related("product").prefetch_related(main_image_prefetch("product__"))
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -437,7 +471,7 @@ class RecentlyViewedViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMi
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return RecentlyViewed.objects.filter(user=self.request.user)[:20]
+        return RecentlyViewed.objects.filter(user=self.request.user, product__status="approved", product__is_active=True).select_related("product").prefetch_related(main_image_prefetch("product__"))[:20]
 
 
 class ProductExportView(generics.GenericAPIView):
@@ -447,7 +481,7 @@ class ProductExportView(generics.GenericAPIView):
 
     def get(self, request):
         format_type = request.query_params.get("export_format", "csv")
-        products = Product.objects.all()
+        products = catalog_queryset(Product.objects.all())
 
         if format_type == "csv":
             return self.export_csv(products)
@@ -476,7 +510,7 @@ class ProductExportView(generics.GenericAPIView):
 
         for product in products:
             writer.writerow(
-                [
+                [safe_spreadsheet_value(value) for value in [
                     product.id,
                     product.name,
                     product.price,
@@ -485,7 +519,7 @@ class ProductExportView(generics.GenericAPIView):
                     product.category.name if product.category else "-",
                     product.brand.name if product.brand else "-",
                     product.created_at,
-                ]
+                ]]
             )
 
         return response
@@ -515,7 +549,7 @@ class ProductExportView(generics.GenericAPIView):
 
         for product in products:
             ws.append(
-                [
+                [safe_spreadsheet_value(value) for value in [
                     product.id,
                     product.name,
                     product.price,
@@ -524,7 +558,7 @@ class ProductExportView(generics.GenericAPIView):
                     product.category.name if product.category else "-",
                     product.brand.name if product.brand else "-",
                     product.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                ]
+                ]]
             )
 
         wb.save(response)
@@ -542,34 +576,44 @@ class BulkProductUploadView(generics.CreateAPIView):
         if not file:
             return Response({"error": "No file provided"}, status=400)
 
-        # read file
-
-        if file.name.endswith(".csv"):
-            df = pd.read_csv(file)
-        elif file.name.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(file)
-        else:
-            return Response(
-                {"error": "Invalid file format. Use CSV or Excel"}, status=400
-            )
+        if file.size > 8 * 1024 * 1024:
+            return Response({"error": "Maximum import size is 8 MB."}, status=400)
+        try:
+            if file.name.lower().endswith(".csv"):
+                df = pd.read_csv(file, nrows=1001)
+            elif file.name.lower().endswith(".xlsx"):
+                with zipfile.ZipFile(file) as archive:
+                    if sum(entry.file_size for entry in archive.infolist()) > 64 * 1024 * 1024:
+                        return Response({"error": "Expanded XLSX size exceeds 64 MB."}, status=400)
+                file.seek(0)
+                df = pd.read_excel(file, nrows=1001)
+            else:
+                return Response({"error": "Invalid file format. Use CSV or XLSX."}, status=400)
+        except Exception:
+            return Response({"error": "Unable to read the import file."}, status=400)
+        if len(df) > 1000:
+            return Response({"error": "Maximum import size is 1000 products."}, status=400)
 
         results = {"created": 0, "errors": []}
 
         for index, row in df.iterrows():
+            data = {}
+            for column, field in (("name", "name"), ("description", "description"), ("price", "price"), ("sku", "sku"), ("category_id", "category"), ("brand_id", "brand")):
+                value = row.get(column)
+                if pd.notna(value):
+                    data[field] = int(value) if isinstance(value, float) and value.is_integer() else value
+            serializer = ProductCreateUpdateSerializer(data=data, context={"request": request})
+            if not serializer.is_valid():
+                results["errors"].append({"row": index + 2, "error": serializer.errors})
+                continue
             try:
-                Product.objects.create(
-                    seller=request.user,
-                    name=row["name"],
-                    description=row.get("description", ""),
-                    price=row["price"],
-                    sku=row["sku"],
-                    category_id=row["category_id"],
-                    brand_id=row.get("brand_id"),
-                    status="pending",
-                )
+                serializer.save(seller=request.user, status=Product.StatusChoices.PENDING)
                 results["created"] += 1
-            except Exception as e:
-                results["errors"].append({"row": index + 2, "error": str(e)})
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if not isinstance(exc, ValidationError):
+                    raise
+                results["errors"].append({"row": index + 2, "error": exc.detail})
 
         return Response(results, status=201)
 
@@ -580,15 +624,22 @@ class ProductComparisonView(generics.GenericAPIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        product_ids = request.query_params.get("ids", "").split(",")
-        if not product_ids or not product_ids[0]:
-            return Response({"error": "Provide product IDs: ?ids=1,2,3"}, status=400)
+        raw_ids = request.query_params.get("ids", "").split(",")
+        try:
+            if not 1 <= len(raw_ids) <= 20:
+                raise ValueError
+            product_ids = [int(value.strip()) for value in raw_ids]
+            if any(not 0 < value <= 2 ** 63 - 1 for value in product_ids) or len(product_ids) != len(set(product_ids)):
+                raise ValueError
+        except ValueError:
+            return Response({"error": "Provide 1 to 20 distinct positive product IDs."}, status=400)
 
-        products = Product.objects.filter(
-            id__in=product_ids, status="approved", is_active=True
-        )
-
-        if products.count() != len(product_ids):
+        products = list(catalog_queryset(Product.objects.filter(
+            id__in=product_ids, status="approved", is_active=True,
+        )).prefetch_related(Prefetch(
+            "product_attributes", queryset=ProductAttribute.objects.select_related("attribute_value__attribute"),
+        )))
+        if len(products) != len(product_ids):
             return Response({"error": "Some products not found"}, status=404)
 
         comparison_data = {"products": [], "attributes": {}}
@@ -600,11 +651,7 @@ class ProductComparisonView(generics.GenericAPIView):
                 "price": product.price,
                 "final_price": product.final_price,
                 "stock": product.stock,
-                "image": (
-                    product.images.filter(is_main=True).first().image.url
-                    if product.images.filter(is_main=True).first()
-                    else None
-                ),
+                "image": ProductListSerializer().get_main_image(product),
                 "attributes": {},
             }
 
@@ -623,7 +670,7 @@ class ProductQRCodeView(generics.GenericAPIView):
 
     def get(self, request, product_id):
         try:
-            product = Product.objects.get(id=product_id, status="approved")
+            product = Product.objects.get(id=product_id, status="approved", is_active=True)
         except Product.DoesNotExist:
             return Response(
                 {"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND

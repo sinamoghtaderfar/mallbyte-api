@@ -38,8 +38,13 @@ class VerifyInput(ChallengeInput):
 
 
 def _get_challenge(raw):
+    version, separator, _nonce = raw.partition(".")
+    if not separator or not version.isascii() or not version.isdigit():
+        return None
     token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     challenge = (
+        # Lock the related user too: a concurrent security change either wins
+        # before this epoch check or revokes the session issued by this request.
         AdminMFAChallenge.objects.select_for_update()
         .select_related("user")
         .filter(token_hash=token_hash)
@@ -47,6 +52,7 @@ def _get_challenge(raw):
     )
     if (
         challenge is None
+        or int(version) != challenge.user.auth_version
         or challenge.used_at is not None
         or challenge.expires_at <= timezone.now()
         or challenge.attempts >= 5

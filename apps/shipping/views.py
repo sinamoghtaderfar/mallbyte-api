@@ -1,11 +1,13 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.orders.models import Order
+from apps.rbac.commerce import can_manage, can_view_all
 from apps.shipping.models import Shipment
+from apps.shipping.querysets import eligible_order_queryset
 from apps.shipping.serializers import (
     EligibleShipmentOrderSerializer,
     ShipmentCancelSerializer,
@@ -46,7 +48,7 @@ class ShipmentViewSet(
         "created_by",
         "seller_fulfillment",
         "seller_fulfillment__seller",
-    ).prefetch_related("events")
+    ).prefetch_related("events__created_by")
 
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
@@ -72,10 +74,11 @@ class ShipmentViewSet(
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        """Staff can see every shipment; buyers only their own shipments."""
+        """Commerce readers/managers see all shipments; buyers see their own."""
         queryset = super().get_queryset()
         user = self.request.user
-        if user.is_staff or user.is_superuser:
+        allowed = can_manage(user, "shipments") if self.action in {"mark_ready", "mark_shipped", "mark_delivered", "cancel"} else can_view_all(user, "shipments")
+        if allowed:
             return queryset
         return queryset.filter(user=user)
 
@@ -97,13 +100,13 @@ class ShipmentViewSet(
         return ShipmentDetailSerializer
 
     @staticmethod
-    def _is_staff_user(user):
-        return user.is_staff or user.is_superuser
+    def _can_manage_shipments(user):
+        return can_manage(user, "shipments")
 
     @staticmethod
-    def _staff_required_response():
+    def _management_required_response():
         return Response(
-            {"detail": "Only staff users can manage shipments."},
+            {"detail": "Shipment management permission is required."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -129,57 +132,30 @@ class ShipmentViewSet(
         A multi-seller order remains eligible after its first seller receives a
         shipment. Older orders without order items retain the one-shipment rule.
         """
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
-        orders = (
-            Order.objects.select_related("user")
-            .prefetch_related("items__product__seller", "seller_fulfillments")
-            .filter(
-                status__in=[
-                    Order.StatusChoices.PAID,
-                    Order.StatusChoices.PROCESSING,
-                ],
-                payment_status=Order.PaymentStatusChoices.PAID,
-            )
-            .order_by("-paid_at", "-created_at")
-        )
-
-        # Keep legacy (item-less) orders available until they have a shipment;
-        # orders with items are available while any seller can still ship.
-        eligible = []
-        excluded_statuses = [
-            Shipment.StatusChoices.CANCELLED,
-            Shipment.StatusChoices.RETURNED,
-        ]
-        seller_serializer = EligibleShipmentOrderSerializer(
-            context={"request": request}
-        )
-        for order in orders:
-            if order.items.exists():
-                if seller_serializer.get_eligible_sellers(order):
-                    eligible.append(order)
-                continue
-
-            has_active_shipment = (
-                Shipment.objects.filter(order=order)
-                .exclude(status__in=excluded_statuses)
-                .exists()
-            )
-            if not has_active_shipment:
-                eligible.append(order)
-
-        serializer = self.get_serializer(eligible, many=True)
+        orders = eligible_order_queryset()
+        page = self.paginate_queryset(orders)
+        serializer = self.get_serializer(page if page is not None else orders, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    def _detail_response(self, shipment, *, response_status=status.HTTP_200_OK):
+        shipment = self.get_queryset().get(pk=shipment.pk)
+        serializer = ShipmentDetailSerializer(shipment, context=self.get_serializer_context())
+        return Response(serializer.data, status=response_status)
+
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         """Create one shipment for the selected seller's part of a paid order.
 
         For a multi-seller order, supply `seller` with the seller's user ID.
         For a single-seller order the seller is inferred by the serializer.
         """
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         serializer = self.get_serializer(
             data=request.data,
@@ -190,15 +166,13 @@ class ShipmentViewSet(
         # converts its validation errors into DRF validation errors.
         shipment = serializer.save()
         self._notify(shipment, "shipment_created")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_201_CREATED,
-        )
+        return self._detail_response(shipment, response_status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-ready")
+    @transaction.atomic
     def mark_ready(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentMarkReadySerializer(
@@ -217,15 +191,13 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_ready")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
 
     @action(detail=True, methods=["post"], url_path="mark-shipped")
+    @transaction.atomic
     def mark_shipped(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentMarkShippedSerializer(
@@ -246,15 +218,13 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_shipped")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
 
     @action(detail=True, methods=["post"], url_path="mark-delivered")
+    @transaction.atomic
     def mark_delivered(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentMarkDeliveredSerializer(
@@ -273,15 +243,13 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_delivered")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)
 
     @action(detail=True, methods=["post"], url_path="cancel")
+    @transaction.atomic
     def cancel(self, request, pk=None):
-        if not self._is_staff_user(request.user):
-            return self._staff_required_response()
+        if not self._can_manage_shipments(request.user):
+            return self._management_required_response()
 
         shipment = self.get_object()
         serializer = ShipmentCancelSerializer(
@@ -300,7 +268,4 @@ class ShipmentViewSet(
 
         shipment.refresh_from_db()
         self._notify(shipment, "shipment_cancelled")
-        return Response(
-            ShipmentDetailSerializer(shipment).data,
-            status=status.HTTP_200_OK,
-        )
+        return self._detail_response(shipment)

@@ -11,8 +11,8 @@ from urllib.parse import quote
 from cryptography.fernet import Fernet
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
-from rest_framework_simplejwt.tokens import RefreshToken
 
+from .auth_tokens import issue_user_tokens
 from .mfa_models import AdminMFADevice
 
 
@@ -87,7 +87,7 @@ def consume_recovery_code(device, candidate):
 def issue_privileged_tokens(user, device):
     if not (device.enabled and is_privileged(user)):
         raise ValueError("MFA enrollment required")
-    refresh = RefreshToken.for_user(user)
+    refresh = issue_user_tokens(user)
     refresh["mfa"] = True
     refresh["mfa_version"] = device.session_version
     return refresh

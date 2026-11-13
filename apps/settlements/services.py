@@ -6,7 +6,7 @@ Trust boundaries:
   * post_verified_refund: only after processor confirms actual refund amount.
   * post_confirmed_payout: only after bank/processor confirms actual transfer.
 """
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -15,9 +15,10 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.accounts.models import Seller, User
-from apps.orders.models import Order, OrderItem
+from apps.orders.models import Order, OrderItem, OrderStatusHistory
 from apps.payments.models import Payment
 from apps.returns.models import ReturnRequest
+
 from .models import (
     ConfirmedPayout,
     ConfirmedRefund,
@@ -126,11 +127,11 @@ def post_captured_payment(payment):
             continue
         entry, _ = SellerLedgerEntry.objects.get_or_create(
             source_key=f"capture:{payment.pk}:{a.pk}",
-            defaults=dict(
-                seller_id=a.seller_id, currency=a.currency,
-                kind=SellerLedgerEntry.Kind.SALE, amount=a.seller_payable,
-                allocation=a, occurred_at=payment.paid_at,
-            ),
+            defaults={
+                "seller_id": a.seller_id, "currency": a.currency,
+                "kind": SellerLedgerEntry.Kind.SALE, "amount": a.seller_payable,
+                "allocation": a, "occurred_at": payment.paid_at,
+            },
         )
         entries.append(entry)
     return entries
@@ -297,6 +298,14 @@ def post_verified_refund(*, payment_id, return_request_id, confirmed_amount,
         payment.status = Payment.StatusChoices.REFUNDED
         payment.refunded_at = confirmed_at
         payment.save(update_fields=["status", "refunded_at", "updated_at"])
+        old_status = order.status
+        order.status = Order.StatusChoices.REFUNDED
+        order.payment_status = Order.PaymentStatusChoices.REFUNDED
+        order.save(update_fields=["status", "payment_status", "total_amount", "updated_at"])
+        OrderStatusHistory.objects.create(
+            order=order, old_status=old_status, new_status=order.status,
+            note="Full captured amount has verified refund evidence.",
+        )
     return refund
 
 

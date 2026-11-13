@@ -18,6 +18,9 @@ if [[ "$DB_NAME" != *staging* && "${ALLOW_PRODUCTION_BACKUP:-}" != "YES" ]]; the
   echo "Non-staging backups require ALLOW_PRODUCTION_BACKUP=YES" >&2
   exit 2
 fi
+export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGDATABASE="$DB_NAME" PGPASSWORD="$DB_PASSWORD"
+source "$(dirname -- "${BASH_SOURCE[0]}")/postgres-client-check.sh"
+require_matching_postgres_clients
 if [[ -L "$BACKUP_DIR" ]]; then
   echo "Refusing symlinked backup directory" >&2
   exit 2
@@ -28,7 +31,6 @@ BACKUP_DIR="$(cd -- "$BACKUP_DIR" && pwd -P)"
 target="$BACKUP_DIR/${DB_NAME}-$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n').dump"
 tmp="${target}.partial"
 trap 'rm -f -- "$tmp"' EXIT
-export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGDATABASE="$DB_NAME" PGPASSWORD="$DB_PASSWORD"
 pg_dump --format=custom --no-owner --no-acl --file="$tmp"
 pg_restore --list "$tmp" >/dev/null
 chmod 600 -- "$tmp"
