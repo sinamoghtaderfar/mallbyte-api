@@ -1,6 +1,5 @@
 from datetime import timedelta
 
-from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -55,7 +54,7 @@ def mark_notification_as_read(*, notification, user):
     Normal user can only mark own notifications.
     """
 
-    if notification.user_id != user.id and not (user.is_staff or user.is_superuser):
+    if notification.user_id != user.id and not user.is_superuser:
         raise PermissionError("You cannot update this notification.")
 
     notification.mark_as_read()
@@ -68,30 +67,25 @@ def mark_notification_as_unread(*, notification, user):
     Normal user can only mark own notifications.
     """
 
-    if notification.user_id != user.id and not (user.is_staff or user.is_superuser):
+    if notification.user_id != user.id and not user.is_superuser:
         raise PermissionError("You cannot update this notification.")
 
     notification.mark_as_unread()
     return notification
 
 
-@transaction.atomic
 def mark_all_notifications_as_read(*, user):
     """
     Mark all unread notifications of current user as read.
     """
 
-    unread_notifications = Notification.objects.select_for_update().filter(
+    unread_notifications = Notification.objects.filter(
         user=user,
         is_read=False,
     )
 
-    count = unread_notifications.count()
-
-    for notification in unread_notifications:
-        notification.mark_as_read()
-
-    return count
+    now = timezone.now()
+    return unread_notifications.update(is_read=True, read_at=now, updated_at=now)
 
 
 def get_unread_notification_count(*, user):
@@ -161,12 +155,8 @@ def mark_selected_notifications_as_read(*, user, notification_ids):
         is_read=False,
     )
 
-    count = notifications.count()
-
-    for notification in notifications:
-        notification.mark_as_read()
-
-    return count
+    now = timezone.now()
+    return notifications.update(is_read=True, read_at=now, updated_at=now)
 
 
 def delete_selected_notifications(*, user, notification_ids):
@@ -188,12 +178,7 @@ def mark_selected_notifications_as_unread(*, user, notification_ids):
         is_read=True,
     )
 
-    count = notifications.count()
-
-    for notification in notifications:
-        notification.mark_as_unread()
-
-    return count
+    return notifications.update(is_read=False, read_at=None, updated_at=timezone.now())
 
 
 def delete_old_read_notifications(*, days=30, user=None):

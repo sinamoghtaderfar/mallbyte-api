@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
+from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import F, Q
 from django.utils.text import slugify
 
 User = get_user_model()
@@ -114,16 +116,16 @@ class Product(models.Model):
     avrage_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
     reviews_count = models.PositiveIntegerField(default=0)
     # Pricing
-    price = models.DecimalField(max_digits=12, decimal_places=0, verbose_name="Price")
+    price = models.DecimalField(max_digits=12, decimal_places=0, verbose_name="Price", validators=[MinValueValidator(0)])
     compare_price = models.DecimalField(
         max_digits=12, decimal_places=0, 
         null=True, blank=True, 
-        verbose_name="Compare Price (was...)"
+        verbose_name="Compare Price (was...)", validators=[MinValueValidator(0)]
     )
     cost_per_item = models.DecimalField(
         max_digits=12, decimal_places=0, 
         null=True, blank=True,
-        verbose_name="Cost per item"
+        verbose_name="Cost per item", validators=[MinValueValidator(0)]
     )
     
     # Status
@@ -148,10 +150,10 @@ class Product(models.Model):
     low_stock_threshold = models.PositiveIntegerField(default=5, verbose_name="Low Stock Alert")
     
     # Weight & dimensions (for shipping)
-    weight = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    length = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    weight = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
+    length = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
+    width = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
+    height = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)])
     
     # SEO
     meta_title = models.CharField(max_length=200, blank=True)
@@ -194,6 +196,13 @@ class Product(models.Model):
             models.Index(fields=['status', 'is_active']),
             models.Index(fields=['-created_at']),
         ]
+        constraints = [
+            models.CheckConstraint(condition=Q(price__gte=0), name="catalog_product_price_nonnegative"),
+            models.CheckConstraint(condition=Q(compare_price__isnull=True) | Q(compare_price__gte=F("price")), name="catalog_product_compare_price_valid"),
+            models.CheckConstraint(condition=Q(cost_per_item__isnull=True) | Q(cost_per_item__gte=0), name="catalog_product_cost_nonnegative"),
+            *[models.CheckConstraint(condition=Q(**{f"{field}__isnull": True}) | Q(**{f"{field}__gte": 0}), name=f"catalog_product_{field}_nonnegative")
+              for field in ("weight", "length", "width", "height")],
+        ]
 
     def __str__(self):
         return self.name
@@ -217,6 +226,8 @@ class Product(models.Model):
     @property
     def total_stock(self):
         """Total stock across all warehouses."""
+        if hasattr(self, "_catalog_stock"):
+            return self._catalog_stock
         result = self.stock_items.aggregate(total=models.Sum("quantity"))
         return result["total"] or 0
 
@@ -224,14 +235,21 @@ class Product(models.Model):
     @property
     def reserved_stock(self):
         """Total reserved stock across all warehouses."""
+        if hasattr(self, "_catalog_reserved"):
+            return self._catalog_reserved
         result = self.stock_items.aggregate(total=models.Sum("reserved_quantity"))
         return result["total"] or 0
 
 
     @property
     def available_stock(self):
-        """Available stock across all warehouses."""
-        return self.total_stock - self.reserved_stock
+        """Unreserved stock in active warehouses eligible for checkout."""
+        if hasattr(self, "_catalog_available"):
+            return self._catalog_available
+        result = self.stock_items.filter(warehouse__is_active=True).aggregate(
+            total=models.Sum(models.F("quantity") - models.F("reserved_quantity")),
+        )
+        return result["total"] or 0
 
 
     @property
@@ -267,6 +285,7 @@ class ProductImage(models.Model):
         verbose_name = "Product Image"
         verbose_name_plural = "Product Images"
         ordering = ['order']
+        constraints = [models.UniqueConstraint(fields=["product"], condition=Q(is_main=True), name="catalog_one_main_image")]
 
     def __str__(self):
         return f"{self.product.name} - Image {self.order}"
@@ -282,8 +301,8 @@ class ProductVariant(models.Model):
     )
     name = models.CharField(max_length=100, verbose_name="Variant Name (e.g., Red, XL)")
     sku = models.CharField(max_length=100, unique=True, verbose_name="SKU")
-    price = models.DecimalField(max_digits=12, decimal_places=0, verbose_name="Price")
-    compare_price = models.DecimalField(max_digits=12, decimal_places=0, null=True, blank=True)
+    price = models.DecimalField(max_digits=12, decimal_places=0, verbose_name="Price", validators=[MinValueValidator(0)])
+    compare_price = models.DecimalField(max_digits=12, decimal_places=0, null=True, blank=True, validators=[MinValueValidator(0)])
     stock = models.PositiveIntegerField(default=0, verbose_name="Stock")
     is_default = models.BooleanField(default=False, verbose_name="Default Variant")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -292,6 +311,11 @@ class ProductVariant(models.Model):
         verbose_name = "Product Variant"
         verbose_name_plural = "Product Variants"
         unique_together = ['product', 'sku']
+        constraints = [
+            models.CheckConstraint(condition=Q(price__gte=0), name="catalog_variant_price_nonnegative"),
+            models.CheckConstraint(condition=Q(compare_price__isnull=True) | Q(compare_price__gte=F("price")), name="catalog_variant_compare_price_valid"),
+            models.UniqueConstraint(fields=["product"], condition=Q(is_default=True), name="catalog_one_default_variant"),
+        ]
 
     def __str__(self):
         return f"{self.product.name} - {self.name}"
@@ -299,7 +323,7 @@ class ProductVariant(models.Model):
     @property
     def final_price(self):
         """Get final price (with discount if any)"""
-        return self.compare_price if self.compare_price else self.price
+        return self.price
 
 
 class Attribute(models.Model):
@@ -379,20 +403,6 @@ class Tag(models.Model):
         super().save(*args, **kwargs)
 
 
-class ProductTag(models.Model):
-    """Product-Tag mapping"""
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='product_tags')
-    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name='tag_products')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = "Product Tag"
-        verbose_name_plural = "Product Tags"
-        unique_together = ['product', 'tag']
-
-    def __str__(self):
-        return f"{self.product.name} - {self.tag.name}"
-
 class Wishlist(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wishlist')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='wishlisted_by')
@@ -416,5 +426,3 @@ class RecentlyViewed(models.Model):
     def __str__(self):
         identifier = self.user.email or self.user.full_name or str(self.user_id)
         return f"{identifier} viewed {self.product.name}"
-    
-    

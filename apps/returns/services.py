@@ -1,4 +1,4 @@
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -8,16 +8,18 @@ from django.utils import timezone
 from apps.notifications.services import create_notification
 from apps.notifications.templates import render_notification_template
 from apps.orders.models import Order, OrderItem, SellerOrderFulfillment
+from apps.rbac.commerce import can_manage, can_view_all
 from apps.returns.models import (
     ReturnItem,
     ReturnRequest,
     ReturnShipment,
     ReturnStatusHistory,
 )
+from apps.returns.refund_amounts import merchandise_net_by_item, refund_amount_for_quantity
 
 
 def is_admin_user(user):
-    return getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+    return can_view_all(user, "returns")
 
 
 def create_return_status_history(
@@ -112,6 +114,11 @@ def create_return_request(
     if not items:
         raise ValidationError("At least one return item is required.")
 
+    item_ids = [item["order_item"].pk for item in items]
+    if len(item_ids) != len(set(item_ids)):
+        raise ValidationError("Each order item may appear only once in a return request.")
+    net_amounts = merchandise_net_by_item(order)
+
     return_request = ReturnRequest.objects.create(
         customer=customer,
         order=order,
@@ -164,7 +171,9 @@ def create_return_request(
                 f"You can return at most {available_quantity} item(s) for {order_item.product_name}."
             )
 
-        requested_refund_amount = order_item.unit_price * quantity
+        requested_refund_amount = refund_amount_for_quantity(
+            order_item, quantity, net_amounts[order_item.pk],
+        )
         total_requested_amount += requested_refund_amount
 
         ReturnItem.objects.create(
@@ -203,7 +212,7 @@ def create_return_request(
 def cancel_return_request(*, return_request, user, note=""):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user) and return_request.customer_id != user.id:
+    if not can_manage(user, "returns") and return_request.customer_id != user.id:
         raise ValidationError("You cannot cancel this return request.")
 
     if return_request.status not in [
@@ -240,7 +249,7 @@ def cancel_return_request(*, return_request, user, note=""):
 def approve_return_request(*, return_request, user, note="", approved_amount=None):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can approve return requests.")
 
     if return_request.status not in [
@@ -320,7 +329,7 @@ def approve_return_request(*, return_request, user, note="", approved_amount=Non
 def reject_return_request(*, return_request, user, note=""):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can reject return requests.")
 
     if return_request.status not in [
@@ -376,7 +385,7 @@ def reject_return_request(*, return_request, user, note=""):
 def mark_return_item_received(*, return_request, user, note=""):
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can mark return requests as received.")
 
     if return_request.status not in [
@@ -419,29 +428,35 @@ def mark_return_item_received(*, return_request, user, note=""):
 
 @transaction.atomic
 def mark_return_refunded(*, return_request, user, note=""):
+    # Same lock order as verified financial posting: Order -> Return.
+    Order.objects.select_for_update().get(pk=return_request.order_id)
     return_request = ReturnRequest.objects.select_for_update().get(pk=return_request.pk)
 
-    if not is_admin_user(user):
+    if not can_manage(user, "returns"):
         raise ValidationError("Only admins can mark return requests as refunded.")
 
     if return_request.status not in [
         ReturnRequest.Status.ITEM_RECEIVED,
         ReturnRequest.Status.INSPECTING,
         ReturnRequest.Status.REFUND_PENDING,
+        ReturnRequest.Status.REFUNDED,
     ]:
         raise ValidationError("This return request cannot be marked as refunded.")
 
-    from django.conf import settings
-    if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
-        from django.db.models import Sum
-        from apps.settlements.models import ConfirmedRefund
-        verified = ConfirmedRefund.objects.filter(
-            return_request_id=return_request.pk,
-        ).aggregate(amount=Sum("amount"))["amount"] or Decimal("0")
-        if verified < return_request.total_approved_amount:
-            raise ValidationError(
-                "The approved return amount has not been fully confirmed by the payment processor."
-            )
+    from apps.settlements.models import ConfirmedRefund
+
+    if return_request.total_approved_amount <= 0:
+        raise ValidationError("A zero-value return cannot be recorded as a monetary refund.")
+    verified = ConfirmedRefund.objects.filter(
+        return_request_id=return_request.pk,
+        payment__order_id=return_request.order_id,
+        payment__status__in=["success", "refunded"],
+    ).aggregate(amount=Sum("amount"))["amount"] or Decimal("0")
+    if verified != return_request.total_approved_amount:
+        raise ValidationError("The approved return amount must match verified refund evidence.")
+
+    if return_request.status == ReturnRequest.Status.REFUNDED:
+        return return_request
 
     old_status = return_request.status
 

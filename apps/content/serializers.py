@@ -1,5 +1,6 @@
 """Typed CMS contracts. All HTML-like text is untrusted and remains plain text."""
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
 from apps.content.models import (
     Announcement,
@@ -31,7 +32,7 @@ class ContentPageSerializer(PublicationSerializerMixin, serializers.ModelSeriali
     created_by_display = serializers.CharField(source="created_by.full_name", read_only=True)
     updated_by_display = serializers.CharField(source="updated_by.full_name", read_only=True)
     is_visible = serializers.SerializerMethodField()
-    slug = serializers.SlugField(required=False, allow_blank=True, max_length=255)
+    slug = serializers.SlugField(required=False, allow_blank=True, max_length=255, validators=[UniqueValidator(queryset=ContentPage.objects.all())])
 
     class Meta:
         model = ContentPage
@@ -114,9 +115,13 @@ class FAQCategorySerializer(serializers.ModelSerializer):
 
     def get_items(self, obj):
         request = self.context.get("request")
-        items = obj.items.all()
-        if not request or not can_view_unpublished(request.user):
-            items = items.filter(is_active=True)
+        items = getattr(obj, "_cms_items", None)
+        if items is None:
+            items = obj.items.select_related("category").all()
+        if "cms_draft_viewer" not in self.context:
+            self.context["cms_draft_viewer"] = bool(request and can_view_unpublished(request.user))
+        if not self.context["cms_draft_viewer"]:
+            items = [item for item in items if item.is_active]
         return FAQItemSerializer(items, many=True, context=self.context).data
 
 
@@ -168,6 +173,8 @@ class NavigationItemSerializer(serializers.ModelSerializer):
         menu = attrs.get("menu", getattr(self.instance, "menu", None))
         parent = attrs.get("parent", getattr(self.instance, "parent", None))
         if parent:
+            if self.instance and self.instance.children.exists():
+                raise serializers.ValidationError({"parent": "Move or remove child items before nesting a parent item."})
             if parent.parent_id is not None:
                 raise serializers.ValidationError({
                     "parent": "Navigation supports only two levels."
@@ -190,15 +197,19 @@ class NavigationItemSerializer(serializers.ModelSerializer):
         return attrs
 
     def get_children(self, obj):
-        request = self.context.get("request")
-        children = obj.children.select_related("page", "menu").all()
-        if request:
-            children = visible_nav_items(children, request.user)
-        else:
+        # The contract supports two levels; prefetched children are leaf nodes.
+        if self.context.get("navigation_leaf"):
+            return []
+        children_map = self.context.get("navigation_children")
+        children = children_map.get(obj.pk, []) if children_map is not None else getattr(obj, "_cms_visible_children", None)
+        if children is None:
+            request = self.context.get("request")
             from django.contrib.auth.models import AnonymousUser
-            children = visible_nav_items(children, AnonymousUser())
+            children = visible_nav_items(
+                obj.children.select_related("page", "menu", "parent"), request.user if request else AnonymousUser(),
+            ).order_by("order", "label", "pk")
         return NavigationItemSerializer(
-            children.order_by("order", "label"), many=True, context=self.context
+            children, many=True, context={**self.context, "navigation_leaf": True},
         ).data
 
 
@@ -216,13 +227,16 @@ class NavigationMenuSerializer(serializers.ModelSerializer):
         ]
 
     def get_items(self, obj):
-        request = self.context.get("request")
-        qs = obj.items.select_related("page", "menu").filter(parent__isnull=True)
-        if request:
-            qs = visible_nav_items(qs, request.user)
-        else:
+        items = getattr(obj, "_cms_visible_items", None)
+        if items is None:
+            request = self.context.get("request")
             from django.contrib.auth.models import AnonymousUser
-            qs = visible_nav_items(qs, AnonymousUser())
+            items = visible_nav_items(
+                obj.items.select_related("page", "menu", "parent"), request.user if request else AnonymousUser(),
+            ).order_by("order", "label", "pk")
+        children = {}
+        for item in items:
+            children.setdefault(item.parent_id, []).append(item)
         return NavigationItemSerializer(
-            qs.order_by("order", "label"), many=True, context=self.context
+            children.get(None, []), many=True, context={**self.context, "navigation_children": children},
         ).data

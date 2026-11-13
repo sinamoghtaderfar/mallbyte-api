@@ -1,0 +1,11 @@
+# Analytics report correctness and delivery
+
+Scheduled/export-now reports now resolve every advertised period explicitly in the active Django time zone. `yesterday`, `last_7_days` and `last_30_days` include completed calendar days; `this_month` includes the current partial month; `previous_month` uses the completed prior calendar month. `all` ends at the report creation instant. Retries use that creation instant, so a retry after midnight cannot silently change the data window. Unknown periods are rejected rather than exporting all historical data.
+
+All report-producing API paths and the scheduler publish tasks only after the database transaction commits. A failed broker publish leaves a durable pending row; the existing periodic schedule runner redelivers pending rows older than five minutes and processing rows older than 35 minutes (beyond the configured 30-minute task limit), at most 50 per pass. A row lock claims work; completed reports and fresh active claims are skipped. Finalization verifies the claim timestamp so a superseded worker cannot replace a newer successful report. Storage/database transient errors request up to three Celery retries with capped exponential delay. Non-transient errors fail visibly with a sanitized class-only message and require correction/manual rerun.
+
+The schedule runner must remain installed and running for broker/worker recovery. This does not guarantee exactly-once broker delivery: duplicate messages are expected and the database claim makes generation idempotent. File storage should be private (see the separate private-media PR); this change does not migrate existing files.
+
+Generated analytics CSV, live analytics CSV and product CSV/XLSX share a formula-safe cell sanitizer, including leading whitespace/control-character variants. Numeric cells remain numeric. Support/returns/reviews export columns labelled customer email now contain email rather than phone.
+
+Regression coverage includes calendar windows, actual order filtering, repeated generation, superseded-worker fencing, after-commit dispatch, broker recovery, sanitized bounded retries and CSV/XLSX injection payloads. No database migration or production-data modification is required.
