@@ -1,8 +1,10 @@
 """Scheduled observability tasks; keep operational logging best-effort."""
 from celery import shared_task
 from django.conf import settings
+
 from apps.observability.services import (
-    cleanup_old_observability_logs, collect_system_health_snapshot,
+    cleanup_old_observability_logs,
+    collect_system_health_snapshot,
 )
 
 

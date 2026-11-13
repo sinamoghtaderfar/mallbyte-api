@@ -1,8 +1,10 @@
 """Best-effort task instrumentation that must never break task execution."""
 import logging
+
 from celery.signals import task_postrun, task_prerun
 from django.conf import settings
 from django.utils import timezone
+
 from apps.observability.models import CeleryTaskLog
 from apps.observability.sanitization import scrub_text
 

@@ -5,7 +5,6 @@ import json
 import secrets
 import sys
 import uuid
-from datetime import timedelta
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction

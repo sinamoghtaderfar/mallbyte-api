@@ -1,15 +1,13 @@
-from datetime import timedelta
 
-from django.db.models import Avg, Count
-from django.utils import timezone
 from django.conf import settings
-from rest_framework import viewsets
+from django.utils import timezone
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework.views import APIView
 
+from apps.observability.metrics import build_metrics
 from apps.observability.models import (
     AuditLog,
     CeleryTaskLog,
@@ -18,14 +16,12 @@ from apps.observability.models import (
     RequestLog,
     SystemHealthSnapshot,
 )
-from apps.observability.workflow_permissions import (
-    SensitiveLogFieldsMixin, ViewAuditLogs,
-)
 from apps.observability.permissions import (
-    IsObservabilityAdmin, IsObservabilityLogsReader,
-    IsObservabilityAlertManager, IsObservabilityErrorManager,
+    IsObservabilityAdmin,
+    IsObservabilityAlertManager,
+    IsObservabilityErrorManager,
+    IsObservabilityLogsReader,
 )
-from apps.observability.metrics import build_metrics
 from apps.observability.serializers import (
     AuditLogSerializer,
     CeleryTaskLogSerializer,
@@ -35,6 +31,10 @@ from apps.observability.serializers import (
     SystemHealthSnapshotSerializer,
 )
 from apps.observability.services import create_audit_log
+from apps.observability.workflow_permissions import (
+    SensitiveLogFieldsMixin,
+    ViewAuditLogs,
+)
 
 
 class ObservabilityHealthView(APIView):

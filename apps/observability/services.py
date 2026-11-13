@@ -1,7 +1,6 @@
 import hashlib
 import ipaddress
 import os
-from django.db import IntegrityError, transaction
 import platform
 import socket
 import time
@@ -13,11 +12,9 @@ import psutil
 import redis
 from celery import current_app
 from django.conf import settings
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from django_celery_beat.models import PeriodicTask
-
-from apps.observability.sanitization import scrub_query, scrub_text
 
 from apps.observability.models import (
     AuditLog,
@@ -28,6 +25,7 @@ from apps.observability.models import (
     SeverityChoices,
     SystemHealthSnapshot,
 )
+from apps.observability.sanitization import scrub_query, scrub_text
 
 
 def decimal_value(value):

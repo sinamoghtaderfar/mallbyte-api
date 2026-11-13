@@ -1,6 +1,7 @@
 """DRF actions for internal incidents, optional diagnosis and approved operations."""
-from django.contrib.auth import get_user_model
 from datetime import timedelta
+
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
@@ -13,18 +14,29 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.observability.ai_diagnosis import ai_ready, has_diagnostic_evidence
 from apps.observability.models import AuditLog
 from apps.observability.permissions import allowed
-from apps.observability.services import create_audit_log
 from apps.observability.sanitization import scrub_text
-from apps.observability.workflow_models import Incident, IncidentEvent, AIDiagnosis, InfrastructureOperation
-from apps.observability.workflow_tasks import run_observability_ai_diagnosis
+from apps.observability.services import create_audit_log
+from apps.observability.workflow_models import AIDiagnosis, Incident, IncidentEvent, InfrastructureOperation
 from apps.observability.workflow_permissions import (
-    ViewIncidents, CreateIncidents, AssignIncidents, ManageIncidents, RequestAIDiagnosis,
-    ViewOperations, RequestOperations, ApproveOperations,
+    ApproveOperations,
+    AssignIncidents,
+    CreateIncidents,
+    ManageIncidents,
+    RequestAIDiagnosis,
+    RequestOperations,
+    ViewIncidents,
+    ViewOperations,
 )
 from apps.observability.workflow_serializers import (
-    IncidentSerializer, IncidentSummarySerializer, IncidentCreateSerializer, IncidentEventSerializer, AIDiagnosisSerializer,
-    InfrastructureOperationSerializer, InfrastructureOperationRequestSerializer,
+    AIDiagnosisSerializer,
+    IncidentCreateSerializer,
+    IncidentEventSerializer,
+    IncidentSerializer,
+    IncidentSummarySerializer,
+    InfrastructureOperationRequestSerializer,
+    InfrastructureOperationSerializer,
 )
+from apps.observability.workflow_tasks import run_observability_ai_diagnosis
 
 
 def audit(request, kind, obj, message):

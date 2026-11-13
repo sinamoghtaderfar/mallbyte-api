@@ -1,8 +1,6 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from apps.observability.workflow_views import IncidentViewSet, InfrastructureOperationViewSet
-
 from apps.observability.views import (
     AuditLogViewSet,
     CeleryTaskLogViewSet,
@@ -13,6 +11,7 @@ from apps.observability.views import (
     RequestLogViewSet,
     SystemHealthSnapshotViewSet,
 )
+from apps.observability.workflow_views import IncidentViewSet, InfrastructureOperationViewSet
 
 router = DefaultRouter()
 router.register(
