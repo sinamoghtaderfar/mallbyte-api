@@ -31,3 +31,19 @@ class SupportAttachmentStorage(FileSystemStorage):
 
     def url(self, name):
         raise ValueError("Support attachments have no public URL.")
+
+
+@deconstructible
+class PrivateMediaStorage(SupportAttachmentStorage):
+    """Private reports and return evidence share the persisted private volume.
+
+    Reuse the existing private-media root by default so upgrades do not silently
+    put worker-generated reports on an unmounted container filesystem.
+    """
+
+    @property
+    def base_location(self):
+        return getattr(settings, "PRIVATE_MEDIA_ROOT", settings.SUPPORT_PRIVATE_MEDIA_ROOT)
+
+    def url(self, name):
+        raise ValueError("Private media is available through authorized downloads only.")
