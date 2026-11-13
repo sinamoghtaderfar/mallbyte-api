@@ -105,13 +105,6 @@ class AddressViewSet(viewsets.ModelViewSet):
     def set_default(self, request, pk=None):
         address = self.get_object()
 
-        Address.objects.filter(
-            user=request.user,
-            is_default=True,
-        ).update(
-            is_default=False,
-        )
-
         address.is_default = True
         address.save(update_fields=["is_default"])
 

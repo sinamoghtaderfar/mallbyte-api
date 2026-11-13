@@ -1,22 +1,23 @@
-from django.shortcuts import get_object_or_404
-from django.db.models import F, Prefetch
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import F, Prefetch
+from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.returns.models import ReturnAttachment, ReturnItem, ReturnRequest
+from apps.rbac.commerce import can_manage
+from apps.returns.models import ReturnAttachment, ReturnItem, ReturnRequest, ReturnStatusHistory
 from apps.returns.serializers import (
+    CustomerReturnRequestDetailSerializer,
     ReturnActionSerializer,
     ReturnApproveSerializer,
-    CustomerReturnRequestDetailSerializer,
-    SellerReturnRequestListSerializer,
-    SellerReturnRequestDetailSerializer,
     ReturnRequestCreateSerializer,
     ReturnRequestDetailSerializer,
     ReturnRequestListSerializer,
+    SellerReturnRequestDetailSerializer,
+    SellerReturnRequestListSerializer,
 )
 from apps.returns.services import (
     approve_return_request,
@@ -38,13 +39,14 @@ class ReturnRequestViewSet(
 
     def get_queryset(self):
         queryset = ReturnRequest.objects.select_related(
-            "customer", "order", "reviewed_by"
-        ).prefetch_related(
-            "items",
-            "items__order_item",
-            "attachments",
-            "status_history",
+            "customer", "order", "reviewed_by", "shipment",
         )
+        if self.action != "list":
+            queryset = queryset.prefetch_related(
+                Prefetch("items", queryset=ReturnItem.objects.select_related("order_item")),
+                Prefetch("attachments", queryset=ReturnAttachment.objects.select_related("uploaded_by")),
+                Prefetch("status_history", queryset=ReturnStatusHistory.objects.select_related("changed_by")),
+            )
 
         if is_admin_user(self.request.user):
             return queryset.all()
@@ -73,6 +75,7 @@ class ReturnRequestViewSet(
         return ReturnRequestDetailSerializer
 
     def _detail_response(self, obj, *, response_status=status.HTTP_200_OK):
+        obj = self.get_queryset().get(pk=obj.pk)
         serializer_class = (
             ReturnRequestDetailSerializer
             if is_admin_user(self.request.user)
@@ -183,7 +186,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can approve return requests."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -211,7 +214,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can reject return requests."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -238,7 +241,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-received")
     def mark_received(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can mark return requests as received."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -265,7 +268,7 @@ class ReturnRequestViewSet(
 
     @action(detail=True, methods=["post"], url_path="mark-refunded")
     def mark_refunded(self, request, pk=None):
-        if not is_admin_user(request.user):
+        if not can_manage(request.user, "returns"):
             return Response(
                 {"detail": "Only admins can mark return requests as refunded."},
                 status=status.HTTP_403_FORBIDDEN,

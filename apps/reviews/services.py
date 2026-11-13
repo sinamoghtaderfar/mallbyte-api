@@ -17,7 +17,9 @@ def normalize_average_rating(value):
     )
 
 
+@transaction.atomic
 def update_product_review_stats(product: Product):
+    product = Product.objects.select_for_update().get(pk=product.pk)
     stats = ProductReview.objects.filter(
         product=product,
         status=ProductReview.StatusChoices.APPROVED,
