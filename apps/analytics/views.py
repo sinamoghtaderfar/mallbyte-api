@@ -1,5 +1,7 @@
 import csv
+from functools import partial
 
+from django.db import transaction
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
@@ -38,7 +40,7 @@ from apps.analytics.services import (
 )
 from apps.analytics.tasks import (
     create_reports_for_schedule,
-    generate_analytics_report,
+    queue_report,
 )
 
 
@@ -231,6 +233,7 @@ class AnalyticsReportScheduleViewSet(
         methods=["post"],
         url_path="run-now",
     )
+    @transaction.atomic
     def run_now(self, request, pk=None):
         schedule = self.get_object()
 
@@ -240,9 +243,7 @@ class AnalyticsReportScheduleViewSet(
         )
 
         for report in reports:
-            generate_analytics_report.delay(
-                str(report.id),
-            )
+            transaction.on_commit(partial(queue_report, str(report.id)))
 
         serializer = AnalyticsGeneratedReportSerializer(
             reports,
@@ -336,11 +337,13 @@ class AnalyticsGeneratedReportViewSet(
 
         filename = report.filename or report.file.name.split("/")[-1]
 
-        return FileResponse(
-            report.file.open("rb"),
-            as_attachment=True,
-            filename=filename,
-        )
+        try:
+            response = FileResponse(report.file.open("rb"), as_attachment=True, filename=filename)
+        except FileNotFoundError:
+            return Response({"detail": "Report file is not available."}, status=status.HTTP_404_NOT_FOUND)
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class GenerateAnalyticsReportNowView(
@@ -351,6 +354,7 @@ class GenerateAnalyticsReportNowView(
         CanManageAnalyticsReports,
     ]
 
+    @transaction.atomic
     def create(self, request):
         serializer = GenerateAnalyticsReportNowSerializer(
             data=request.data,
@@ -368,9 +372,7 @@ class GenerateAnalyticsReportNowView(
                 period=period,
                 generated_by=request.user,
             )
-            generate_analytics_report.delay(
-                str(report.id),
-            )
+            transaction.on_commit(partial(queue_report, str(report.id)))
             reports.append(report)
 
         output_serializer = AnalyticsGeneratedReportSerializer(

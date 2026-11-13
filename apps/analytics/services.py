@@ -7,6 +7,7 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from apps.analytics.financial_reporting import get_reporting_financial
+from apps.common.exports import safe_spreadsheet_value
 from apps.content.models import Announcement, Banner, ContentPage, FAQItem
 from apps.inventory.models import Stock
 from apps.orders.models import Order, OrderItem
@@ -70,7 +71,34 @@ def get_date_range(*, period="month", start_date=None, end_date=None):
     if period == "year":
         return now - timedelta(days=365), now
 
-    return None, None
+    if period == "all":
+        return None, None
+    raise ValueError("Unsupported analytics period.")
+
+
+def get_scheduled_report_date_range(period, *, at=None):
+    """Resolve scheduled reports to explicit local calendar boundaries.
+
+    Last N days cover completed days; this_month includes the current partial
+    month. Capture the instant once so all report rows use the same boundary.
+    """
+    at = timezone.localtime(at or timezone.now())
+    today = at.replace(hour=0, minute=0, second=0, microsecond=0)
+    last_tick = timedelta(microseconds=1)
+    if period == "all":
+        return None, at
+    if period in {"yesterday", "last_7_days", "last_30_days"}:
+        days = {"yesterday": 1, "last_7_days": 7, "last_30_days": 30}[period]
+        start_date = today.date() - timedelta(days=days)
+        start = timezone.make_aware(datetime.combine(start_date, time.min), timezone.get_current_timezone())
+        return start, today - last_tick
+    first = today.replace(day=1)
+    if period == "this_month":
+        return first, at
+    if period == "previous_month":
+        last_month = first - timedelta(days=1)
+        return last_month.replace(day=1), first - last_tick
+    raise ValueError("Unsupported scheduled report period.")
 
 
 def get_previous_date_range(start_at, end_at):
@@ -1155,23 +1183,15 @@ def get_analytics_alerts(*, limit=10):
     }
     
 def safe_csv_value(value):
-    if value is None:
-        return ""
-
-    value = str(value)
-
-    if value.startswith(("=", "+", "-", "@")):
-        return f"'{value}"
-
-    return value
+    """Backward-compatible import for callers of the original CSV helper."""
+    return safe_spreadsheet_value(value)
 
 
-def build_csv_export_data(*, report, period="month", start_date=None, end_date=None):
-    start_at, end_at = get_date_range(
-        period=period,
-        start_date=start_date,
-        end_date=end_date,
-    )
+def build_csv_export_data(*, report, period="month", start_date=None, end_date=None, scheduled=False, at=None):
+    if scheduled:
+        start_at, end_at = get_scheduled_report_date_range(period, at=at)
+    else:
+        start_at, end_at = get_date_range(period=period, start_date=start_date, end_date=end_date)
 
     if report == "sales":
         return build_sales_export(start_at, end_at)
@@ -1471,7 +1491,7 @@ def build_support_export(start_at, end_at):
         [
             ticket.ticket_number,
             ticket.customer_id,
-            ticket.customer.phone,
+            ticket.customer.email,
             ticket.assigned_to_id or "",
             ticket.subject,
             ticket.category,
@@ -1529,7 +1549,7 @@ def build_returns_export(start_at, end_at):
         [
             return_request.request_number,
             return_request.customer_id or "",
-            return_request.customer.phone if return_request.customer_id else "",
+            return_request.customer.email if return_request.customer_id else "",
             return_request.order.order_number,
             return_request.status,
             return_request.reason,
@@ -1589,7 +1609,7 @@ def build_reviews_export(start_at, end_at):
             review.product_id,
             review.product.name,
             review.customer_id,
-            review.customer.phone,
+            review.customer.email,
             review.rating,
             review.title,
             review.status,

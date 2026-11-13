@@ -79,6 +79,9 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
 
         valid_types = {choice[0] for choice in Notification.NotificationType.choices}
 
+        if any(not isinstance(item, str) for item in value):
+            raise serializers.ValidationError("Notification types must be strings.")
+
         invalid_types = [item for item in value if item not in valid_types]
 
         if invalid_types:
@@ -93,6 +96,9 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("muted_channels must be a list.")
 
         valid_channels = {choice[0] for choice in Notification.Channel.choices}
+
+        if any(not isinstance(item, str) for item in value):
+            raise serializers.ValidationError("Channels must be strings.")
 
         invalid_channels = [item for item in value if item not in valid_channels]
 
@@ -112,10 +118,13 @@ class NotificationIdsSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("ids cannot be empty.")
 
+        if len(value) > 1000:
+            raise serializers.ValidationError("At most 1000 ids may be submitted.")
+
         cleaned_ids = []
 
         for item in value:
-            if not isinstance(item, int):
+            if type(item) is not int:
                 raise serializers.ValidationError("ids must contain integers only.")
 
             if item <= 0:
@@ -123,7 +132,6 @@ class NotificationIdsSerializer(serializers.Serializer):
                     "ids must contain positive integers only."
                 )
 
-            if item not in cleaned_ids:
-                cleaned_ids.append(item)
+            cleaned_ids.append(item)
 
-        return cleaned_ids
+        return list(dict.fromkeys(cleaned_ids))
