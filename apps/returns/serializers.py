@@ -51,7 +51,7 @@ class ReturnRequestCreateSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
     )
-    items = ReturnItemCreateSerializer(many=True)
+    items = ReturnItemCreateSerializer(many=True, allow_empty=False, max_length=100)
 
     def create(self, validated_data):
         request = self.context["request"]

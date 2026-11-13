@@ -139,11 +139,11 @@ class SellerOrderAPITests(APITestCase):
         response = self.client.get("/api/orders/orders/seller/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["id"], order.id)
-        self.assertEqual(response.data[0]["seller_items_count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["id"], order.id)
+        self.assertEqual(response.data["results"][0]["seller_items_count"], 1)
         self.assertEqual(
-            Decimal(str(response.data[0]["seller_total_amount"])), Decimal("1000")
+            Decimal(str(response.data["results"][0]["seller_total_amount"])), Decimal("1000")
         )
 
     def test_seller_detail_only_returns_own_items(self):

@@ -2,6 +2,7 @@
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Count, Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -13,6 +14,7 @@ from apps.orders.models import (
     Cart,
     CartItem,
     Order,
+    OrderItem,
     OrderStatusHistory,
     SellerOrderFulfillment,
     SellerOrderFulfillmentHistory,
@@ -200,10 +202,14 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         """
         user = self.request.user
 
-        queryset = Order.objects.select_related("user").prefetch_related(
-            "items",
-            "status_history",
-        )
+        queryset = Order.objects.select_related("user")
+        if self.action == "list":
+            queryset = queryset.annotate(_items_count=Count("items"))
+        else:
+            queryset = queryset.prefetch_related(
+                Prefetch("items", queryset=OrderItem.objects.select_related("product", "warehouse")),
+                "status_history__changed_by",
+            )
 
         allowed = can_manage(user, "orders") if self.action in {"cancel", "update_status"} else can_view_all(user, "orders")
         if allowed:
@@ -252,8 +258,17 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         return (
             Order.objects.select_related("user")
             .prefetch_related(
-                "items__product",
-                "status_history",
+                Prefetch(
+                    "items",
+                    queryset=OrderItem.objects.filter(product__seller=user).select_related("product"),
+                    to_attr="seller_visible_items",
+                ),
+                Prefetch(
+                    "seller_fulfillments",
+                    queryset=SellerOrderFulfillment.objects.filter(seller=user),
+                    to_attr="seller_visible_fulfillments",
+                ),
+                "status_history__changed_by",
             )
             .filter(items__product__seller=user)
             .distinct()
@@ -332,11 +347,14 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
         """
         orders = self._get_seller_queryset(request.user)
 
+        page = self.paginate_queryset(orders)
         serializer = SellerOrderListSerializer(
-            orders,
+            page if page is not None else orders,
             many=True,
             context={"request": request},
         )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="seller-detail")
