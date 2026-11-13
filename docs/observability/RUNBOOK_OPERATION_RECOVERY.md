@@ -8,7 +8,7 @@
 systemctl --user status mallbyte-observability-ops.timer --no-pager
 systemctl --user status mallbyte-observability-ops.service --no-pager
 journalctl --user -u mallbyte-observability-ops.service -n 60 --no-pager
-python3 deploy/observability_ops/host_runner.py --dry-run
+python3 deploy/observability_ops/host_runner.py --environment development --dry-run
 ```
 
 The timer being `active (waiting)` and its one-shot service being `inactive (dead)` with `0/SUCCESS` is expected. Dry-run only lists *eligible* approvals.
@@ -52,10 +52,12 @@ This writes an Audit Log, clears its one-time token, and does **not** execute or
 V3 sets `TimeoutStartSec=300` (seconds) because Compose restart + container checks can exceed systemd's default startup timeout. After applying v3, re-run:
 
 ```bash
-python3 deploy/observability_ops/install_timer.py --install
+python3 deploy/observability_ops/install_timer.py --environment development --install
 systemctl --user cat mallbyte-observability-ops.service
 ```
 
 Only reconfigure the timer after validating the deployment scripts. It keeps a user-scoped service; permanent unattended production operations require a dedicated host account, least-privilege host policy, and approval architecture review.
 
 Redis must be handled manually according to `RUNBOOK_REDIS.md`; it is never in the runner's hardcoded allowlist.
+
+Select `--environment staging` or `--environment production` explicitly on those hosts. The runner and timer use only that environment’s fixed Compose file; there is no development fallback. Timer unit names include the environment. Remove the old `mallbyte-observability-ops.timer` unit before replacing an existing installation.

@@ -174,6 +174,11 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 # Reate limit settings for throttling
+AUTH_TRUSTED_PROXY_NETWORKS = [
+    network.strip()
+    for network in os.getenv("AUTH_TRUSTED_PROXY_NETWORKS", "").split(",")
+    if network.strip()
+]
 REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
@@ -246,6 +251,16 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+# The server owns shipping charges and pending inventory hold duration.
+CHECKOUT_SHIPPING_COST = os.getenv("CHECKOUT_SHIPPING_COST", "0")
+ORDER_RESERVATION_TTL_SECONDS = int(os.getenv("ORDER_RESERVATION_TTL_SECONDS", "1800"))
+CELERY_BEAT_SCHEDULE = {
+    "expire-pending-order-reservations": {
+        "task": "apps.orders.tasks.expire_pending_orders",
+        "schedule": 60.0,
+    },
+}
+
 ################################
 
 OBSERVABILITY_SLOW_REQUEST_THRESHOLD_MS = 1000
@@ -314,6 +329,7 @@ AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
 
 # Required for the Next.js frontend to send refresh cookies
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
+CORS_EXPOSE_HEADERS = ["Link", "X-Total-Count"]
 
 # Incident workflows: AI enabled automatically with an explicitly configured key.
 # OBSERVABILITY_AI_ENABLED=false acts as a global emergency kill switch.

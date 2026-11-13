@@ -2,6 +2,7 @@
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -17,6 +18,7 @@ from apps.payments.serializers import (
     PaymentSuccessSerializer,
 )
 from apps.payments.services import create_payment_notification
+from apps.rbac.commerce import can_manage, can_view_all
 
 
 class PaymentViewSet(
@@ -44,19 +46,20 @@ class PaymentViewSet(
         "user",
         "created_by",
     ).prefetch_related(
-        "events",
+        "events__created_by",
     )
 
     def get_queryset(self):
         """
         Normal users can see only their own payments.
-        Staff and superusers can see all payments.
+        Explicit commerce readers/managers can see all payments.
         """
 
         user = self.request.user
         queryset = super().get_queryset()
 
-        if user.is_staff or user.is_superuser:
+        allowed = can_manage(user, "payments") if self.action in {"mark_success", "mark_failed", "cancel"} else can_view_all(user, "payments")
+        if allowed:
             return queryset
 
         return queryset.filter(user=user)
@@ -83,6 +86,11 @@ class PaymentViewSet(
 
         return PaymentDetailSerializer
 
+    def _detail_response(self, payment, *, response_status=status.HTTP_200_OK):
+        payment = self.get_queryset().get(pk=payment.pk)
+        serializer = PaymentDetailSerializer(payment, context=self.get_serializer_context())
+        return Response(serializer.data, status=response_status)
+
     def create(self, request, *args, **kwargs):
         """
         Create a new payment attempt for an order.
@@ -102,10 +110,10 @@ class PaymentViewSet(
 
         payment = serializer.save()
 
-        response_serializer = PaymentDetailSerializer(payment)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return self._detail_response(payment, response_status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-success")
+    @transaction.atomic
     def mark_success(self, request, pk=None):
         """
         Mark payment as successful.
@@ -163,10 +171,10 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(payment)
 
     @action(detail=True, methods=["post"], url_path="mark-failed")
+    @transaction.atomic
     def mark_failed(self, request, pk=None):
         """
         Mark payment as failed.
@@ -218,10 +226,10 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(payment)
 
     @action(detail=True, methods=["post"], url_path="cancel")
+    @transaction.atomic
     def cancel(self, request, pk=None):
         """
         Cancel a payment attempt.
@@ -266,5 +274,4 @@ class PaymentViewSet(
             order_id=payment.order.order_number,
         )
 
-        response_serializer = PaymentDetailSerializer(payment)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return self._detail_response(payment)

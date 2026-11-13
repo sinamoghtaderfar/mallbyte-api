@@ -143,7 +143,7 @@ class EligibleShipmentOrdersTests(APITestCase):
             status.HTTP_200_OK,
         )
 
-        returned_ids = {item["id"] for item in response.data}
+        returned_ids = {item["id"] for item in response.data["results"]}
 
         self.assertIn(
             self.eligible_order.id,
@@ -178,7 +178,7 @@ class EligibleShipmentOrdersTests(APITestCase):
         )
 
         order_data = next(
-            item for item in response.data if item["id"] == self.eligible_order.id
+            item for item in response.data["results"] if item["id"] == self.eligible_order.id
         )
 
         self.assertEqual(
@@ -230,7 +230,7 @@ class EligibleShipmentOrdersTests(APITestCase):
 
         self.assertEqual(
             response.data["detail"],
-            "Only staff users can manage shipments.",
+            "Shipment management permission is required.",
         )
 
     def test_created_shipment_removes_order_from_eligible_orders(self):
@@ -244,7 +244,7 @@ class EligibleShipmentOrdersTests(APITestCase):
             eligible_url,
         )
 
-        initial_ids = {item["id"] for item in response.data}
+        initial_ids = {item["id"] for item in response.data["results"]}
 
         self.assertIn(
             self.eligible_order.id,
@@ -273,7 +273,7 @@ class EligibleShipmentOrdersTests(APITestCase):
             eligible_url,
         )
 
-        final_ids = {item["id"] for item in response.data}
+        final_ids = {item["id"] for item in response.data["results"]}
 
         self.assertNotIn(
             self.eligible_order.id,

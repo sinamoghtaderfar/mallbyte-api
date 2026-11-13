@@ -1,6 +1,18 @@
 from rest_framework import permissions
 
+from apps.rbac.utils import has_permission
 from apps.reviews.models import ProductReview
+
+
+def can_moderate_reviews(user):
+    return bool(user and user.is_authenticated and user.is_active and not user.is_deleted and (
+        user.has_perm("reviews.change_productreview") or has_permission(user, "moderate_reviews")
+    ))
+
+
+class CanModerateReviews(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return can_moderate_reviews(request.user)
 
 
 class IsReviewOwnerOrAdminOrReadOnly(permissions.BasePermission):
@@ -12,8 +24,7 @@ class IsReviewOwnerOrAdminOrReadOnly(permissions.BasePermission):
             if request.user and request.user.is_authenticated:
                 return (
                     obj.customer == request.user
-                    or request.user.is_staff
-                    or request.user.is_superuser
+                    or can_moderate_reviews(request.user)
                 )
 
             return False
@@ -23,6 +34,5 @@ class IsReviewOwnerOrAdminOrReadOnly(permissions.BasePermission):
 
         return (
             obj.customer == request.user
-            or request.user.is_staff
-            or request.user.is_superuser
+            or can_moderate_reviews(request.user)
         )
