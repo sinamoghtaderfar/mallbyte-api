@@ -16,6 +16,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .cache import build_cache_settings
+
 # Load environment variables
 load_dotenv()
 
@@ -118,8 +120,6 @@ DATABASES = {
     }
 }
 # Cache: deterministic configuration; Redis is mandatory outside DEBUG.
-from .cache import build_cache_settings
-
 CACHES = build_cache_settings(
     debug=DEBUG,
     backend=os.getenv("CACHE_BACKEND"),
@@ -257,6 +257,16 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+# The server owns shipping charges and pending inventory hold duration.
+CHECKOUT_SHIPPING_COST = os.getenv("CHECKOUT_SHIPPING_COST", "0")
+ORDER_RESERVATION_TTL_SECONDS = int(os.getenv("ORDER_RESERVATION_TTL_SECONDS", "1800"))
+CELERY_BEAT_SCHEDULE = {
+    "expire-pending-order-reservations": {
+        "task": "apps.orders.tasks.expire_pending_orders",
+        "schedule": 60.0,
+    },
+}
+
 ################################
 
 OBSERVABILITY_SLOW_REQUEST_THRESHOLD_MS = 1000
@@ -325,6 +335,7 @@ AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
 
 # Required for the Next.js frontend to send refresh cookies
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
+CORS_EXPOSE_HEADERS = ["Link", "X-Total-Count"]
 
 # Incident workflows: AI enabled automatically with an explicitly configured key.
 # OBSERVABILITY_AI_ENABLED=false acts as a global emergency kill switch.

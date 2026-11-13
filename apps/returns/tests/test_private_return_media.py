@@ -1,18 +1,40 @@
 import tempfile
 from pathlib import Path
 
+from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APITestCase
 
+from apps.rbac.models import Permission, Role, RolePermission
+from apps.rbac.utils import assign_role
 from apps.returns.models import ReturnShipment
 from apps.returns.serializers import ReturnAttachmentSerializer, ReturnShipmentSerializer
 from apps.returns.tests import test_multiseller_returns_security as fixtures
 
 
 class PrivateReturnMediaTests(APITestCase):
-    setUp = fixtures.MultiSellerReturnsSecurityTests.setUp
+    def setUp(self):
+        # Transaction rollback reuses IDs; the legacy RBAC cache outlives rows.
+        cache.clear()
+        self.addCleanup(cache.clear)
+        fixtures.MultiSellerReturnsSecurityTests.setUp(self)
+
+    def test_explicit_return_manager_can_read_evidence_without_unrelated_read_grant(self):
+        permission, _ = Permission.objects.get_or_create(
+            codename="manage_returns", defaults={"name": "Manage returns", "module": "returns"},
+        )
+        role = Role.objects.create(name="private-return-manager")
+        RolePermission.objects.create(role=role, permission=permission)
+        assign_role(self.other_buyer, role)
+        attachment = self.claim.attachments.first()
+        with tempfile.TemporaryDirectory() as root, override_settings(SUPPORT_PRIVATE_MEDIA_ROOT=root):
+            attachment.file.save("manager-evidence.txt", ContentFile(b"manager evidence"))
+            self.client.force_authenticate(self.other_buyer)
+            response = self.client.get(reverse("return-attachment-download", args=[attachment.pk]))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(b"".join(response.streaming_content), b"manager evidence")
 
     def test_attachment_download_enforces_customer_seller_and_internal_visibility(self):
         with tempfile.TemporaryDirectory() as root, override_settings(SUPPORT_PRIVATE_MEDIA_ROOT=root):

@@ -51,7 +51,7 @@ class ReturnRequestCreateSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
     )
-    items = ReturnItemCreateSerializer(many=True)
+    items = ReturnItemCreateSerializer(many=True, allow_empty=False, max_length=100)
 
     def create(self, validated_data):
         request = self.context["request"]
@@ -394,7 +394,7 @@ class ReturnApproveSerializer(serializers.Serializer):
         allow_blank=True,
     )
     approved_amount = serializers.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         required=False,
         min_value=0,

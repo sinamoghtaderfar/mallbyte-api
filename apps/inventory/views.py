@@ -28,15 +28,23 @@ from apps.inventory.serializers import (
 )
 
 
-class WarehouseViewSet(viewsets.ModelViewSet):
+class WarehouseViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
     """
     Manage warehouses.
 
     Read:
         view_inventory
 
-    Create/update/delete:
+    Create/update:
         manage_inventory
+
+    Deactivate used warehouses instead of deleting inventory history.
     """
 
     queryset = Warehouse.objects.all()
