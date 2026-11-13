@@ -138,7 +138,7 @@ class Stock(models.Model):
     )
     warehouse = models.ForeignKey(
         Warehouse,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="stock_items",
         verbose_name="Warehouse",
     )
@@ -297,7 +297,7 @@ class StockMovement(models.Model):
     )
     warehouse = models.ForeignKey(
         Warehouse,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="stock_movements",
         verbose_name="Warehouse",
     )
@@ -460,13 +460,13 @@ class StockTransfer(models.Model):
 
     from_warehouse = models.ForeignKey(
         Warehouse,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="transfers_out",
         verbose_name="From Warehouse",
     )
     to_warehouse = models.ForeignKey(
         Warehouse,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="transfers_in",
         verbose_name="To Warehouse",
     )

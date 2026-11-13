@@ -244,10 +244,10 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertIn("access", response.data)
+        self.assertTrue(response.data["verification_required"])
+        self.assertNotIn("access", response.data)
         self.assertNotIn("refresh", response.data)
-        self.assertIn(get_refresh_cookie_name(), response.cookies)
-        self.assertTrue(response.cookies[get_refresh_cookie_name()]["httponly"])
+        self.assertNotIn(get_refresh_cookie_name(), response.cookies)
         self.assertEqual(response.data["user"]["email"], "register@example.com")
 
         user = User.objects.get(email="register@example.com")
@@ -504,7 +504,8 @@ class AuthFlowAPITestCase(AccountsTestMixin, APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(OTP.objects.filter(email="unknown@example.com").exists())
 
     @override_settings(**EMAIL_TEST_SETTINGS)
     def test_password_reset_verify_changes_password(self):
@@ -938,7 +939,7 @@ class EmailVerificationAPITestCase(AccountsTestMixin, APITestCase):
 
         user.refresh_from_db()
 
-        self.assertEqual(user.email, "new-email@example.com")
+        self.assertEqual(user.email, "old-email@example.com")
 
     @override_settings(**EMAIL_TEST_SETTINGS)
     def test_email_verify_request_rejects_already_verified_user(self):
@@ -951,7 +952,7 @@ class EmailVerificationAPITestCase(AccountsTestMixin, APITestCase):
         response = self.client.post(
             "/api/auth/email/verify-request/",
             {
-                "email": "another@example.com",
+                "email": "verified@example.com",
             },
             format="json",
         )

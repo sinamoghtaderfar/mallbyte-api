@@ -2,8 +2,15 @@ import hashlib
 
 from rest_framework.throttling import SimpleRateThrottle
 
+from .client_ip import client_ip
 
-class ScopedIPRateThrottle(SimpleRateThrottle):
+
+class TrustedClientRateThrottle(SimpleRateThrottle):
+    def get_ident(self, request):
+        return client_ip(request)
+
+
+class ScopedIPRateThrottle(TrustedClientRateThrottle):
     scope = None
 
     def get_cache_key(self, request, view):
@@ -18,7 +25,7 @@ class ScopedIPRateThrottle(SimpleRateThrottle):
         }
 
 
-class EmailFieldRateThrottle(SimpleRateThrottle):
+class EmailFieldRateThrottle(TrustedClientRateThrottle):
     scope = None
     email_field = "email"
 

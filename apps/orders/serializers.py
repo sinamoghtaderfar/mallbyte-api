@@ -1,12 +1,18 @@
+import hashlib
+import json
 from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import F, IntegerField, OuterRef, Prefetch, Subquery, Sum, prefetch_related_objects
+from django.db.models.functions import Coalesce
 from rest_framework import serializers
 
+from apps.accounts.models import Seller
 from apps.discounts.services import apply_discount_to_order, validate_discount_for_cart
 from apps.inventory.models import Stock
+from apps.orders.checkout_policy import reservation_deadline, shipping_charge
 from apps.orders.models import (
     Cart,
     CartItem,
@@ -17,6 +23,7 @@ from apps.orders.models import (
 )
 from apps.orders.services import create_order_notification
 from apps.products.models import Product
+from apps.rbac.commerce import can_view_all
 
 # ============================================================
 # Cart Item Serializer
@@ -32,7 +39,12 @@ class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.ReadOnlyField(source="product.name")
     product_sku = serializers.ReadOnlyField(source="product.sku")
     product_price = serializers.ReadOnlyField(source="product.final_price")
-    available_stock = serializers.ReadOnlyField(source="product.available_stock")
+    available_stock = serializers.SerializerMethodField()
+
+    def get_available_stock(self, obj):
+        if hasattr(obj, "_cart_available_stock"):
+            return obj._cart_available_stock
+        return obj.product.available_stock
     total_price = serializers.DecimalField(
         max_digits=12,
         decimal_places=0,
@@ -75,11 +87,20 @@ class CartSerializer(serializers.ModelSerializer):
 
     items = CartItemSerializer(many=True, read_only=True)
     total_items = serializers.IntegerField(read_only=True)
-    subtotal = serializers.DecimalField(
-        max_digits=12,
-        decimal_places=0,
-        read_only=True,
-    )
+    subtotal = serializers.SerializerMethodField()
+
+    def get_subtotal(self, obj):
+        return str(sum((item.total_price for item in obj.items.all()), Decimal("0")))
+
+    def to_representation(self, instance):
+        available = Stock.objects.filter(product_id=OuterRef("product_id"), warehouse__is_active=True).order_by().values("product_id").annotate(
+            value=Sum(F("quantity") - F("reserved_quantity")),
+        ).values("value")
+        items = CartItem.objects.select_related("product").annotate(
+            _cart_available_stock=Coalesce(Subquery(available, output_field=IntegerField()), 0),
+        )
+        prefetch_related_objects([instance], Prefetch("items", queryset=items))
+        return super().to_representation(instance)
 
     class Meta:
         model = Cart
@@ -275,6 +296,8 @@ class OrderListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_items_count(self, obj):
+        if hasattr(obj, "_items_count"):
+            return obj._items_count
         return obj.items.count()
 
 
@@ -287,6 +310,14 @@ class OrderDetailSerializer(serializers.ModelSerializer):
     """
     Full order details with items and status history.
     """
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request is None or not can_view_all(request.user, "orders"):
+            fields.pop("admin_note", None)
+        return fields
+
 
     items = OrderItemSerializer(many=True, read_only=True)
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
@@ -325,6 +356,7 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             "admin_note",
             "paid_at",
             "cancelled_at",
+            "reservation_expires_at",
             "delivered_at",
             "created_at",
             "updated_at",
@@ -372,9 +404,25 @@ class SellerFulfillmentStatusMixin:
         if request is None or not request.user.is_authenticated:
             return None
 
-        return obj.seller_fulfillments.filter(
-            seller_id=request.user.pk,
-        ).first()
+        if hasattr(obj, "seller_visible_fulfillments"):
+            return next(iter(obj.seller_visible_fulfillments), None)
+        cache = self.context.setdefault("_seller_fulfillment_cache", {})
+        key = (obj.pk, request.user.pk)
+        if key not in cache:
+            cache[key] = obj.seller_fulfillments.filter(seller_id=request.user.pk).first()
+        return cache[key]
+
+    def _seller_items(self, obj):
+        request = self.context.get("request")
+        if request is None or not request.user.is_authenticated:
+            return []
+        if hasattr(obj, "seller_visible_items"):
+            return obj.seller_visible_items
+        cache = self.context.setdefault("_seller_item_cache", {})
+        key = (obj.pk, request.user.pk)
+        if key not in cache:
+            cache[key] = list(obj.items.select_related("product").filter(product__seller_id=request.user.pk))
+        return cache[key]
 
     def get_seller_status(self, obj):
         fulfillment = self._seller_fulfillment(obj)
@@ -427,17 +475,6 @@ class SellerOrderListSerializer(
             "delivered_at",
         ]
         read_only_fields = fields
-
-    def _seller_items(self, obj):
-        request = self.context.get("request")
-        if request is None or not request.user.is_authenticated:
-            return []
-
-        return [
-            item
-            for item in obj.items.all()
-            if item.product.seller_id == request.user.pk
-        ]
 
     def get_seller_items_count(self, obj):
         return len(self._seller_items(obj))
@@ -501,28 +538,19 @@ class SellerOrderDetailSerializer(
         ]
         read_only_fields = fields
 
-    def _seller_items_queryset(self, obj):
-        request = self.context.get("request")
-        if request is None or not request.user.is_authenticated:
-            return obj.items.none()
-
-        return obj.items.select_related("product").filter(
-            product__seller=request.user,
-        )
-
     def get_items(self, obj):
         serializer = SellerOrderItemSerializer(
-            self._seller_items_queryset(obj),
+            self._seller_items(obj),
             many=True,
         )
         return serializer.data
 
     def get_seller_items_count(self, obj):
-        return self._seller_items_queryset(obj).count()
+        return len(self._seller_items(obj))
 
     def get_seller_total_amount(self, obj):
         return sum(
-            (item.total_price for item in self._seller_items_queryset(obj)),
+            (item.total_price for item in self._seller_items(obj)),
             Decimal("0"),
         )
 
@@ -619,174 +647,131 @@ class CheckoutSerializer(serializers.Serializer):
         allow_blank=True,
         write_only=True,
     )
+    idempotency_key = serializers.CharField(
+        max_length=128, min_length=8, required=False, write_only=True,
+    )
 
     shipping_cost = serializers.DecimalField(
         max_digits=12,
         decimal_places=0,
         required=False,
-        default=0,
         min_value=0,
     )
 
     def validate(self, attrs):
         request = self.context["request"]
-        user = request.user
-
-        try:
-            cart = user.cart
-        except Cart.DoesNotExist as exc:
-            raise serializers.ValidationError("Cart does not exist.") from exc
-
-        if not cart.items.exists():
-            raise serializers.ValidationError("Cart is empty.")
-
-        # Check stock for each cart item before checkout.
-        for item in cart.items.select_related("product"):
-            if item.product.available_stock < item.quantity:
-                raise serializers.ValidationError(
-                    {"stock": f"Not enough stock for {item.product.name}."}
-                )
-
-        discount_code = attrs.get("discount_code", "").strip()
-
-        if discount_code:
-            try:
-                discount, discount_amount = validate_discount_for_cart(
-                    code=discount_code,
-                    user=user,
-                    cart=cart,
-                )
-            except DjangoValidationError as exc:
-                message = exc.messages[0] if hasattr(exc, "messages") else str(exc)
-
-                raise serializers.ValidationError(
-                    {
-                        "discount_code": message,
-                    }
-                ) from exc
-
-            attrs["discount"] = discount
-            attrs["discount_amount"] = discount_amount
-        else:
-            attrs["discount"] = None
-            attrs["discount_amount"] = 0
-
-        attrs["cart"] = cart
+        header_key = request.headers.get("Idempotency-Key", "")
+        body_key = attrs.get("idempotency_key", "")
+        if header_key:
+            header_key = serializers.CharField(min_length=8, max_length=128).run_validation(header_key)
+        if body_key and header_key and body_key != header_key:
+            raise serializers.ValidationError({"idempotency_key": "Header and body keys must match."})
+        attrs["idempotency_key"] = header_key or body_key
+        attrs["discount_code"] = attrs.get("discount_code", "").strip()
         return attrs
 
     def create(self, validated_data):
-        """
-        Create order from cart.
-
-        Important:
-        - We reserve stock here.
-        - Discount is applied before payment.
-        - Payment will be handled later in payments app.
-        """
-        request = self.context["request"]
-        user = request.user
-        cart = validated_data.pop("cart")
-
-        discount = validated_data.pop("discount", None)
-        validated_data.pop("discount_amount", 0)
-        validated_data.pop("discount_code", "")
-
-        shipping_cost = validated_data.pop("shipping_cost", 0)
-
+        # Every cart mutation acquires this same Cart lock. Recheck existence,
+        # eligibility and totals only after taking it; validation is not a lock.
+        user = self.context["request"].user
+        values = dict(validated_data)
+        key = values.pop("idempotency_key", "")
+        fingerprint = hashlib.sha256(
+            json.dumps(values, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
         with transaction.atomic():
-            order = Order.objects.create(
-                user=user,
-                subtotal=cart.subtotal,
-                discount_amount=0,
-                shipping_cost=shipping_cost,
-                receiver_name=validated_data["receiver_name"],
-                receiver_phone=validated_data["receiver_phone"],
-                province=validated_data["province"],
-                city=validated_data["city"],
-                address=validated_data["address"],
-                postal_code=validated_data["postal_code"],
-                customer_note=validated_data.get("customer_note", ""),
-            )
-
-            for cart_item in cart.items.select_related("product"):
-                stock = self._reserve_from_first_available_stock(
-                    product=cart_item.product,
-                    quantity=cart_item.quantity,
-                    user=user,
+            cart = Cart.objects.select_for_update().filter(user=user).first()
+            if key:
+                previous = Order.objects.filter(user=user, checkout_key=key).first()
+                if previous:
+                    if previous.checkout_fingerprint != fingerprint:
+                        raise serializers.ValidationError({"idempotency_key": "This key was already used with different checkout details."})
+                    return previous
+            if cart is None:
+                raise serializers.ValidationError("Cart does not exist.")
+            items = list(cart.items.select_for_update().order_by("product_id", "pk"))
+            if not items:
+                raise serializers.ValidationError("Cart is empty.")
+            products = {
+                product.pk: product
+                for product in Product.objects.select_for_update(no_key=True).filter(
+                    pk__in=[item.product_id for item in items]
+                ).order_by("pk")
+            }
+            from apps.accounts.models import User
+            sellers = {
+                seller.pk: seller for seller in User.objects.select_for_update(no_key=True).filter(
+                    pk__in={product.seller_id for product in products.values()}
+                ).order_by("pk")
+            }
+            profiles = {
+                profile.user_id: profile
+                for profile in Seller.objects.select_for_update().filter(
+                    user_id__in=sellers
+                ).order_by("user_id")
+            }
+            for item in items:
+                product = products.get(item.product_id)
+                seller = sellers.get(product.seller_id) if product else None
+                profile = profiles.get(product.seller_id) if product else None
+                if (
+                    product is None or not product.is_active
+                    or product.status != Product.StatusChoices.APPROVED
+                    or seller is None or not seller.is_active or seller.is_deleted
+                    or not seller.is_seller or profile is None
+                    or profile.status != Seller.StatusChoices.APPROVED
+                ):
+                    raise serializers.ValidationError({"product": "A cart product or its seller is no longer eligible for sale."})
+                item.product = product
+            charge = shipping_charge()
+            if "shipping_cost" in values and values["shipping_cost"] != charge:
+                raise serializers.ValidationError({"shipping_cost": "Shipping cost must match the server delivery charge."})
+            discount_code = values.pop("discount_code", "")
+            values.pop("shipping_cost", None)
+            try:
+                discount = None
+                if discount_code:
+                    discount, _ = validate_discount_for_cart(code=discount_code, user=user, cart=cart)
+                order = Order.objects.create(
+                    user=user, subtotal=sum((item.total_price for item in items), Decimal("0")),
+                    shipping_cost=charge, checkout_key=key,
+                    checkout_fingerprint=fingerprint if key else "",
+                    reservation_expires_at=reservation_deadline(), **values,
                 )
-
-                OrderItem.objects.create(
-                    order=order,
-                    product=cart_item.product,
-                    warehouse=stock.warehouse,
-                    product_name=cart_item.product.name,
-                    product_sku=cart_item.product.sku,
-                    quantity=cart_item.quantity,
-                    unit_price=cart_item.unit_price,
-                    total_price=cart_item.total_price,
-                )
-                SellerOrderFulfillment.objects.get_or_create(
-                    order=order,
-                    seller=cart_item.product.seller,
-                    defaults={
-                        "status": Order.StatusChoices.PENDING_PAYMENT,
-                    },
-                )
-            if discount is not None:
-                apply_discount_to_order(
-                    discount=discount,
-                    user=user,
-                    cart=cart,
-                    order=order,
-                )
-                order.refresh_from_db()
-
-            if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
-                from apps.settlements.services import build_order_allocations
-
-                build_order_allocations(order, currency="IRR")
-
+                for item in items:
+                    stock = self._reserve_from_first_available_stock(item.product, item.quantity, user)
+                    OrderItem.objects.create(
+                        order=order, product=item.product, warehouse=stock.warehouse,
+                        product_name=item.product.name, product_sku=item.product.sku,
+                        quantity=item.quantity, unit_price=item.unit_price,
+                        total_price=item.total_price,
+                    )
+                    SellerOrderFulfillment.objects.get_or_create(order=order, seller_id=item.product.seller_id)
+                if discount is not None:
+                    apply_discount_to_order(discount=discount, user=user, cart=cart, order=order)
+                    order.refresh_from_db()
+                if getattr(settings, "SETTLEMENTS_LEDGER_ENABLED", False):
+                    from apps.settlements.services import build_order_allocations
+                    build_order_allocations(order, currency="IRR")
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"detail": exc.messages}) from exc
             OrderStatusHistory.objects.create(
-                order=order,
-                old_status="",
-                new_status=order.status,
-                changed_by=user,
-                note="Order created from cart.",
+                order=order, old_status="", new_status=order.status,
+                changed_by=user, note="Order created from cart.",
             )
-            create_order_notification(
-                order=order,
-                template_key="order_created",
-                order_id=order.order_number,
-            )
+            create_order_notification(order=order, template_key="order_created", order_id=order.order_number)
             cart.clear()
-
-        return order
+            return order
 
     def _reserve_from_first_available_stock(self, product, quantity, user):
-        """
-        Reserve stock from the first warehouse that has enough available stock.
-
-        Later we can improve this with:
-        - nearest warehouse
-        - seller warehouse
-        - shipping zone
-        """
-
-        stocks = (
-            Stock.objects.select_related("warehouse")
-            .filter(product=product, warehouse__is_active=True)
-            .order_by("id")
-        )
-
+        stocks = Stock.objects.select_for_update(of=("self",)).select_related("warehouse").filter(
+            product=product, warehouse__is_active=True,
+        ).order_by("pk")
         for stock in stocks:
             if stock.available_quantity >= quantity:
                 stock.reserve(quantity=quantity, user=user)
-                stock.refresh_from_db()
                 return stock
-
-        raise serializers.ValidationError(
-            {"stock": f"Not enough stock for {product.name}."}
-        )
+        raise serializers.ValidationError({"stock": f"Not enough stock for {product.name}."})
 
 
 # ============================================================

@@ -1,7 +1,6 @@
 from django.core.cache import cache
+from django.db.models import Q
 from django.utils import timezone
-
-PERMISSION_CACHE_TIMEOUT = 3600
 
 
 def get_permissions_cache_key(user):
@@ -21,53 +20,25 @@ def get_user_roles(user):
 
 
 def get_user_permissions(user):
-    """Get all permissions for a user with caching."""
-    if user.is_anonymous:
+    """Read authorization from the database, including inside transactions.
+
+    Shared result caches can retain grants after rollback or publish stale grants
+    after a concurrent revocation. A single DISTINCT join avoids those races.
+    """
+    if not user.is_authenticated or not user.is_active or user.is_deleted:
         return []
 
-    cache_key = get_permissions_cache_key(user)
-    cached_permissions = cache.get(cache_key)
+    from .models import Permission
 
-    if cached_permissions is not None:
-        return cached_permissions
-
-    if user.is_superuser:
-        from .models import Permission
-
-        permissions = list(
-            Permission.objects.order_by("codename").values_list("codename", flat=True)
-        )
-
-    else:
-        permissions_set = set()
-
-        user_roles = user.user_roles.select_related("role").prefetch_related(
-            "role__role_permissions__permission"
-        ).filter(
-            is_active=True
-        )
-
-        for user_role in user_roles:
-            if user_role.is_expired:
-                continue
-
-            for role_permission in user_role.role.role_permissions.all():
-                permissions_set.add(role_permission.permission.codename)
-
-        permissions = sorted(permissions_set)
-
-    timeout = PERMISSION_CACHE_TIMEOUT
+    permissions = Permission.objects.all()
     if not user.is_superuser:
-        next_expiry = (
-            user.user_roles.filter(is_active=True, expires_at__gt=timezone.now())
-            .order_by("expires_at").values_list("expires_at", flat=True).first()
+        permissions = permissions.filter(
+            Q(permission_roles__role__role_users__expires_at__isnull=True)
+            | Q(permission_roles__role__role_users__expires_at__gt=timezone.now()),
+            permission_roles__role__role_users__user_id=user.pk,
+            permission_roles__role__role_users__is_active=True,
         )
-        if next_expiry is not None:
-            seconds = int((next_expiry - timezone.now()).total_seconds())
-            timeout = min(timeout, max(1, seconds))
-    cache.set(cache_key, permissions, timeout)
-
-    return permissions
+    return list(permissions.order_by("codename").values_list("codename", flat=True).distinct())
 
 
 def clear_user_permissions_cache(user):
@@ -85,7 +56,7 @@ def clear_role_permissions_cache(role):
 
 def has_permission(user, permission_codename):
     """Check if user has a specific permission."""
-    if user.is_anonymous:
+    if not user.is_authenticated or not user.is_active or user.is_deleted:
         return False
 
     if user.is_superuser:
@@ -143,13 +114,12 @@ def sync_user_permissions(user):
 
 
 def get_client_ip(request):
-    """Get client IP from request."""
-    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    """Use the same trusted-peer address policy as authentication throttles."""
+    from apps.accounts.client_ip import client_ip
 
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0].strip()
-
-    return request.META.get("REMOTE_ADDR")
+    address = client_ip(request)
+    # Throttles use a stable unknown bucket; audit IP columns are nullable IPs.
+    return None if address == "unknown" else address
 
 
 def log_admin_action(

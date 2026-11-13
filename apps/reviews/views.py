@@ -1,9 +1,9 @@
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import (
-    IsAdminUser,
     IsAuthenticated,
     IsAuthenticatedOrReadOnly,
 )
@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from apps.products.models import Product
 from apps.reviews.models import ProductReview, ProductReviewVote
 from apps.reviews.notifications import create_review_notification
-from apps.reviews.permissions import IsReviewOwnerOrAdminOrReadOnly
+from apps.reviews.permissions import CanModerateReviews, IsReviewOwnerOrAdminOrReadOnly, can_moderate_reviews
 from apps.reviews.serializers import (
     ProductReviewModerationSerializer,
     ProductReviewSerializer,
@@ -42,7 +42,7 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
 
         user = self.request.user
 
-        if user.is_authenticated and (user.is_staff or user.is_superuser):
+        if can_moderate_reviews(user):
             pass
         elif user.is_authenticated:
             queryset = queryset.filter(
@@ -73,6 +73,8 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
             elif verified.lower() == "false":
                 queryset = queryset.filter(is_verified_purchase=False)
 
+        if self.action in ("approve", "reject", "hide"):
+            queryset = queryset.select_for_update(of=("self",))
         return queryset.order_by("-created_at")
     
     @action(
@@ -105,8 +107,9 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="approve",
-        permission_classes=[IsAdminUser],
+        permission_classes=[CanModerateReviews],
     )
+    @transaction.atomic
     def approve(self, request, pk=None):
         review = self.get_object()
 
@@ -140,8 +143,9 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="reject",
-        permission_classes=[IsAdminUser],
+        permission_classes=[CanModerateReviews],
     )
+    @transaction.atomic
     def reject(self, request, pk=None):
         review = self.get_object()
 
@@ -178,14 +182,9 @@ class ProductReviewViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="hide",
-        permission_classes=[IsAdminUser],
+        permission_classes=[CanModerateReviews],
     )
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="hide",
-        permission_classes=[IsAdminUser],
-    )
+    @transaction.atomic
     def hide(self, request, pk=None):
         review = self.get_object()
 

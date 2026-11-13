@@ -471,7 +471,7 @@ class ScheduledAnalyticsReportsAPITestCase(APITestCase):
             kwargs={"pk": schedule.pk},
         )
 
-        with patch("apps.analytics.views.generate_analytics_report.delay") as mocked_delay:
+        with patch("apps.analytics.tasks.generate_analytics_report.delay") as mocked_delay, self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(url, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
@@ -484,7 +484,7 @@ class ScheduledAnalyticsReportsAPITestCase(APITestCase):
 
         url = reverse("analytics-generate-report-now-list")
 
-        with patch("apps.analytics.views.generate_analytics_report.delay") as mocked_delay:
+        with patch("apps.analytics.tasks.generate_analytics_report.delay") as mocked_delay, self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
                 url,
                 {
@@ -582,7 +582,8 @@ class ScheduledAnalyticsReportsAPITestCase(APITestCase):
         )
 
         with patch("apps.analytics.tasks.generate_analytics_report.delay") as mocked_delay:
-            result = run_due_analytics_report_schedules()
+            with self.captureOnCommitCallbacks(execute=True):
+                result = run_due_analytics_report_schedules()
 
         self.assertEqual(result["processed_schedules"], 1)
         self.assertEqual(result["queued_reports"], 2)
@@ -648,7 +649,8 @@ class ScheduledAnalyticsReportsAPITestCase(APITestCase):
             "apps.analytics.tasks.build_csv_export_data",
             side_effect=RuntimeError("Export failed"),
         ):
-            result = generate_analytics_report(str(report.id))
+            with self.assertRaises(RuntimeError):
+                generate_analytics_report(str(report.id))
 
         report.refresh_from_db()
 
@@ -656,8 +658,7 @@ class ScheduledAnalyticsReportsAPITestCase(APITestCase):
             report.status,
             AnalyticsGeneratedReport.StatusChoices.FAILED,
         )
-        self.assertEqual(result["status"], AnalyticsGeneratedReport.StatusChoices.FAILED)
-        self.assertIn("Export failed", report.error_message)
+        self.assertIn("RuntimeError", report.error_message)
         self.assertIsNotNone(report.completed_at)
 
     def test_admin_can_download_successful_generated_report(self):

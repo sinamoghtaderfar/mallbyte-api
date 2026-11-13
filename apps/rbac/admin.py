@@ -1,10 +1,11 @@
 from django.contrib import admin
 
+from .admin_security import SuperuserMutationAdminMixin
 from .models import AdminLog, Permission, Role, RolePermission, UserRole
 
 
 @admin.register(Role)
-class RoleAdmin(admin.ModelAdmin):
+class RoleAdmin(SuperuserMutationAdminMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "name",
@@ -22,7 +23,7 @@ class RoleAdmin(admin.ModelAdmin):
 
 
 @admin.register(Permission)
-class PermissionAdmin(admin.ModelAdmin):
+class PermissionAdmin(SuperuserMutationAdminMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "name",
@@ -39,7 +40,7 @@ class PermissionAdmin(admin.ModelAdmin):
 
 
 @admin.register(RolePermission)
-class RolePermissionAdmin(admin.ModelAdmin):
+class RolePermissionAdmin(SuperuserMutationAdminMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "role",
@@ -57,7 +58,7 @@ class RolePermissionAdmin(admin.ModelAdmin):
 
 
 @admin.register(UserRole)
-class UserRoleAdmin(admin.ModelAdmin):
+class UserRoleAdmin(SuperuserMutationAdminMixin, admin.ModelAdmin):
     list_display = [
         "id",
         "user",
@@ -80,6 +81,15 @@ class UserRoleAdmin(admin.ModelAdmin):
 
 @admin.register(AdminLog)
 class AdminLogAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
     list_display = [
         "id",
         "admin",
