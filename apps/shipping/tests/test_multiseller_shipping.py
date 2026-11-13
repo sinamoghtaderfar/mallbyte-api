@@ -160,7 +160,7 @@ class MultiSellerShippingTests(APITestCase):
     def test_eligible_order_lists_both_sellers(self):
         response = self.client.get(reverse("shipment-eligible-orders"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        order_data = next(item for item in response.data if item["id"] == self.order.pk)
+        order_data = next(item for item in response.data["results"] if item["id"] == self.order.pk)
         self.assertTrue(order_data["requires_seller_selection"])
         self.assertEqual(
             {seller["id"] for seller in order_data["eligible_sellers"]},
@@ -197,14 +197,14 @@ class MultiSellerShippingTests(APITestCase):
     def test_first_shipment_does_not_hide_second_seller_from_eligible_orders(self):
         self.create_shipment(self.first_seller)
         response = self.client.get(reverse("shipment-eligible-orders"))
-        order_data = next(item for item in response.data if item["id"] == self.order.pk)
+        order_data = next(item for item in response.data["results"] if item["id"] == self.order.pk)
         self.assertEqual(
             [seller["id"] for seller in order_data["eligible_sellers"]],
             [self.second_seller.pk],
         )
         self.create_shipment(self.second_seller)
         response = self.client.get(reverse("shipment-eligible-orders"))
-        self.assertNotIn(self.order.pk, {item["id"] for item in response.data})
+        self.assertNotIn(self.order.pk, {item["id"] for item in response.data["results"]})
 
     def test_same_seller_cannot_have_two_active_shipments(self):
         self.create_shipment(self.first_seller)

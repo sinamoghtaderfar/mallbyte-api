@@ -1,5 +1,6 @@
 """Permission classes enforce policy on every endpoint, not just frontend controls."""
 from rest_framework.permissions import BasePermission
+
 from apps.observability.permissions import allowed
 
 
@@ -50,10 +51,12 @@ class SensitiveLogFieldsMixin:
     """Hide identity/traceback/metadata fields unless specifically authorized."""
 
     def get_serializer_class(self):
-        from apps.observability.workflow_serializers import (
-            ErrorSummarySerializer, RequestSummarySerializer, CeleryTaskSummarySerializer,
-        )
         from apps.observability.permissions import allowed
+        from apps.observability.workflow_serializers import (
+            CeleryTaskSummarySerializer,
+            ErrorSummarySerializer,
+            RequestSummarySerializer,
+        )
         if allowed(self.request.user, "view_observability_error_details"):
             return super().get_serializer_class()
         safe = {

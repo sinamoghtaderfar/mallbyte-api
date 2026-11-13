@@ -16,6 +16,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .cache import build_cache_settings
+
 # Load environment variables
 load_dotenv()
 
@@ -118,8 +120,6 @@ DATABASES = {
     }
 }
 # Cache: deterministic configuration; Redis is mandatory outside DEBUG.
-from .cache import build_cache_settings
-
 CACHES = build_cache_settings(
     debug=DEBUG,
     backend=os.getenv("CACHE_BACKEND"),
@@ -174,6 +174,11 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 # Reate limit settings for throttling
+AUTH_TRUSTED_PROXY_NETWORKS = [
+    network.strip()
+    for network in os.getenv("AUTH_TRUSTED_PROXY_NETWORKS", "").split(",")
+    if network.strip()
+]
 REST_FRAMEWORK.setdefault("DEFAULT_THROTTLE_RATES", {})
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"].update(
@@ -223,17 +228,6 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 
-# Email settings
-
-EMAIL_BACKEND = os.getenv(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
-EMAIL_HOST = os.getenv("EMAIL_HOST")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@mallbyte.com")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 CELERY_BROKER_URL = os.getenv(
@@ -256,6 +250,16 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+# The server owns shipping charges and pending inventory hold duration.
+CHECKOUT_SHIPPING_COST = os.getenv("CHECKOUT_SHIPPING_COST", "0")
+ORDER_RESERVATION_TTL_SECONDS = int(os.getenv("ORDER_RESERVATION_TTL_SECONDS", "1800"))
+CELERY_BEAT_SCHEDULE = {
+    "expire-pending-order-reservations": {
+        "task": "apps.orders.tasks.expire_pending_orders",
+        "schedule": 60.0,
+    },
+}
 
 ################################
 
@@ -325,6 +329,7 @@ AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
 
 # Required for the Next.js frontend to send refresh cookies
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
+CORS_EXPOSE_HEADERS = ["Link", "X-Total-Count"]
 
 # Incident workflows: AI enabled automatically with an explicitly configured key.
 # OBSERVABILITY_AI_ENABLED=false acts as a global emergency kill switch.

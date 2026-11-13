@@ -1,5 +1,6 @@
 """Least-privilege observability authorization; staff flags alone grant nothing."""
 from rest_framework.permissions import BasePermission
+
 from apps.rbac.utils import has_permission
 
 

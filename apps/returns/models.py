@@ -1,10 +1,13 @@
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+from apps.support.storage import PrivateMediaStorage
 
 
 def return_file_upload_path(instance, filename):
@@ -113,14 +116,14 @@ class ReturnRequest(TimeStampedModel):
     internal_note = models.TextField(blank=True)
 
     total_requested_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
     )
 
     total_approved_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
@@ -152,6 +155,10 @@ class ReturnRequest(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(total_approved_amount__gte=0),
                 name="return_total_approved_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_approved_amount__lte=models.F("total_requested_amount")),
+                name="return_approved_lte_requested",
             ),
         ]
 
@@ -229,14 +236,14 @@ class ReturnItem(TimeStampedModel):
     inspection_note = models.TextField(blank=True)
 
     requested_refund_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
     )
 
     approved_refund_amount = models.DecimalField(
-        max_digits=10,
+        max_digits=18,
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
@@ -260,6 +267,10 @@ class ReturnItem(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(approved_refund_amount__gte=0),
                 name="return_item_approved_refund_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(approved_refund_amount__lte=models.F("requested_refund_amount")),
+                name="return_item_approved_lte_requested",
             ),
         ]
 
@@ -303,7 +314,7 @@ class ReturnAttachment(TimeStampedModel):
         default=AttachmentType.OTHER,
     )
 
-    file = models.FileField(upload_to=return_file_upload_path)
+    file = models.FileField(upload_to=return_file_upload_path, storage=PrivateMediaStorage())
     caption = models.CharField(max_length=255, blank=True)
 
     class Meta:
@@ -326,6 +337,7 @@ class ReturnShipment(TimeStampedModel):
 
     shipping_label = models.FileField(
         upload_to=return_file_upload_path,
+        storage=PrivateMediaStorage(),
         blank=True,
         null=True,
     )
@@ -368,3 +380,51 @@ class ReturnStatusHistory(TimeStampedModel):
 
     def __str__(self):
         return f"{self.return_request.request_number}: {self.old_status} → {self.new_status}"
+
+
+class RestorationQuerySet(models.QuerySet):
+    def bulk_create(self, objs, *args, **kwargs):
+        if kwargs.get("update_conflicts"):
+            raise ValidationError("Return stock restoration records are append-only.")
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def update(self, **kwargs):
+        raise ValidationError("Return stock restoration records are append-only.")
+
+    def delete(self):
+        raise ValidationError("Return stock restoration records are append-only.")
+
+
+class ReturnStockRestoration(models.Model):
+    """An explicit saleability decision and its one immutable inventory movement."""
+
+    return_item = models.ForeignKey(ReturnItem, on_delete=models.PROTECT, related_name="stock_restorations")
+    movement = models.OneToOneField("inventory.StockMovement", on_delete=models.PROTECT,
+                                  related_name="return_restoration")
+    warehouse = models.ForeignKey("inventory.Warehouse", on_delete=models.PROTECT,
+                                 related_name="return_restorations")
+    quantity = models.PositiveIntegerField()
+    idempotency_key = models.CharField(max_length=128)
+    sellable_confirmed = models.BooleanField(default=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                              related_name="return_stock_restorations")
+    note = models.CharField(max_length=2000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = RestorationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["return_item", "idempotency_key"], name="return_restock_item_key_unique"),
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="return_restock_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(sellable_confirmed=True), name="return_restock_sellable_confirmed"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding or self.pk is not None:
+            raise ValidationError("Return stock restoration records are append-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Return stock restoration records are append-only.")

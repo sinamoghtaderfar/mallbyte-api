@@ -1,19 +1,20 @@
 """Regression suite: least privilege, incident lifecycle, AI opt-in and two-person ops."""
 from datetime import timedelta
-from django.core.management import call_command
 from io import StringIO
 from unittest.mock import patch
+
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import override_settings
-from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
+
 from apps.accounts.models import User
-from apps.rbac.models import Role
-from apps.rbac.utils import assign_role
+from apps.observability.ai_diagnosis import build_context
 from apps.observability.models import AuditLog, ErrorLog, RequestLog
 from apps.observability.workflow_models import Incident, IncidentEvent, InfrastructureOperation
-from apps.observability.ai_diagnosis import build_context
+from apps.rbac.models import Role
+from apps.rbac.utils import assign_role
 
 
 class WorkflowTests(APITestCase):
@@ -57,7 +58,7 @@ class WorkflowTests(APITestCase):
         self.assertEqual(self.client.post('/api/observability/incidents/',
             {'title':'No access'},format='json').status_code, 403)
         self.assertEqual(self.client.get('/api/observability/audit-logs/').status_code, 403)
-        self.assertEqual(self.client.get('/api/observability/incidents/%s/events/' % incident_id).status_code, 403)
+        self.assertEqual(self.client.get(f'/api/observability/incidents/{incident_id}/events/').status_code, 403)
 
     def test_operator_log_details_masked_and_audit_denied(self):
         self.login(self.operator)
@@ -214,8 +215,8 @@ class WorkflowTests(APITestCase):
         op.refresh_from_db()
         self.assertEqual(op.status,InfrastructureOperation.Status.RUNNING)
         self.assertTrue(op.execution_token_hash)
-        from unittest.mock import patch as mock_patch
         import io
+        from unittest.mock import patch as mock_patch
         with mock_patch('sys.stdin',io.StringIO(token+'\n')):
             output=StringIO()
             call_command('observability_ops_bridge','complete',operation_id=str(op.id),

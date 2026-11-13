@@ -8,21 +8,25 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import override_settings, SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
-from apps.rbac.models import Role
-from apps.rbac.utils import assign_role, has_permission
 from apps.observability.ai_diagnosis import (
-    AIUnavailable, ask_ai_diagnosis, build_context, has_diagnostic_evidence,
+    AIUnavailable,
+    ask_ai_diagnosis,
+    build_context,
+    has_diagnostic_evidence,
 )
-from apps.observability.models import AuditLog, ErrorLog
+from apps.observability.models import AuditLog
 from apps.observability.workflow_models import (
-    AIDiagnosis, Incident, IncidentEvent, InfrastructureOperation,
+    AIDiagnosis,
+    InfrastructureOperation,
 )
 from apps.observability.workflow_tasks import run_observability_ai_diagnosis
+from apps.rbac.models import Role
+from apps.rbac.utils import assign_role, has_permission
 
 
 class QualityPromptTests(SimpleTestCase):
