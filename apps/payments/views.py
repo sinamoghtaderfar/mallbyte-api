@@ -2,6 +2,7 @@
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -112,6 +113,7 @@ class PaymentViewSet(
         return self._detail_response(payment, response_status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="mark-success")
+    @transaction.atomic
     def mark_success(self, request, pk=None):
         """
         Mark payment as successful.
@@ -172,6 +174,7 @@ class PaymentViewSet(
         return self._detail_response(payment)
 
     @action(detail=True, methods=["post"], url_path="mark-failed")
+    @transaction.atomic
     def mark_failed(self, request, pk=None):
         """
         Mark payment as failed.
@@ -226,6 +229,7 @@ class PaymentViewSet(
         return self._detail_response(payment)
 
     @action(detail=True, methods=["post"], url_path="cancel")
+    @transaction.atomic
     def cancel(self, request, pk=None):
         """
         Cancel a payment attempt.
