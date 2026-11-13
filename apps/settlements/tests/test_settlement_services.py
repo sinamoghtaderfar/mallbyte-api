@@ -10,13 +10,17 @@ from apps.accounts.models import Seller, User
 from apps.orders.models import Order, OrderItem
 from apps.payments.models import Payment
 from apps.products.models import Category, Product
-from apps.returns.models import ReturnRequest, ReturnItem
 from apps.rbac.models import Role
 from apps.rbac.utils import assign_role
-from apps.settlements.models import ItemAllocation, SellerLedgerEntry, ConfirmedRefund
+from apps.returns.models import ReturnItem, ReturnRequest
+from apps.settlements.models import ConfirmedRefund, ItemAllocation, SellerLedgerEntry
 from apps.settlements.services import (
-    allocate, build_order_allocations, post_captured_payment,
-    post_verified_refund, post_confirmed_payout, seller_balance,
+    allocate,
+    build_order_allocations,
+    post_captured_payment,
+    post_confirmed_payout,
+    post_verified_refund,
+    seller_balance,
 )
 
 
@@ -87,11 +91,11 @@ class SettlementAccountingTests(TestCase):
             requested_refund_amount=50, approved_refund_amount=50,
             status=ReturnItem.ItemStatus.APPROVED,
         )
-        kwargs = dict(
-            payment_id=self.payment.pk, return_request_id=ret.pk, confirmed_amount="50.00",
-            currency="IRR", gateway_reference="gateway-ref-001", idempotency_key="refund-001",
-            lines=[{"order_item_id": self.item_a.pk, "merchandise": "50.00", "shipping": "0", "tax": "0"}], confirmed_at=self.now,
-        )
+        kwargs = {
+            "payment_id": self.payment.pk, "return_request_id": ret.pk, "confirmed_amount": "50.00",
+            "currency": "IRR", "gateway_reference": "gateway-ref-001", "idempotency_key": "refund-001",
+            "lines": [{"order_item_id": self.item_a.pk, "merchandise": "50.00", "shipping": "0", "tax": "0"}], "confirmed_at": self.now,
+        }
         first = post_verified_refund(**kwargs)
         second = post_verified_refund(**kwargs)
         self.assertEqual(first.pk, second.pk)
@@ -119,7 +123,7 @@ class SettlementAccountingTests(TestCase):
 
     def test_confirmed_payout_never_initiates_transfer_and_is_idempotent(self):
         self._snap_and_post()
-        args = dict(seller_id=self.seller_a.pk, currency="IRR", amount="40", external_reference="bank-001", idempotency_key="pay-001", confirmed_at=self.now)
+        args = {"seller_id": self.seller_a.pk, "currency": "IRR", "amount": "40", "external_reference": "bank-001", "idempotency_key": "pay-001", "confirmed_at": self.now}
         first = post_confirmed_payout(**args)
         self.assertEqual(first.pk, post_confirmed_payout(**args).pk)
         self.assertEqual(seller_balance(self.seller_a.pk, "IRR"), Decimal("41.00"))

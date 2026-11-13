@@ -12,7 +12,10 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import (
-    ObjectDoesNotExist, ValidationError as DjangoValidationError,
+    ObjectDoesNotExist,
+)
+from django.core.exceptions import (
+    ValidationError as DjangoValidationError,
 )
 from django.db import IntegrityError
 from django.utils import timezone
@@ -24,7 +27,6 @@ from rest_framework.views import APIView
 from apps.accounts.models import Seller
 from apps.payments.models import Payment
 from apps.settlements.services import post_confirmed_payout, post_verified_refund
-
 
 MAX_BODY_BYTES = 64 * 1024
 MAX_SKEW_SECONDS = 300
@@ -140,6 +142,7 @@ class CaptureConfirmationView(SignedBridgeView):
 
     def handle_event(self, event):
         from django.db import transaction
+
         from apps.orders.models import Order
         from apps.settlements.services import money, post_captured_payment
         # Same lock sequence used by Payment.mark_success and post_captured_payment.

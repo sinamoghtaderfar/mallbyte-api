@@ -7,11 +7,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.analytics.permissions import CanViewSellerAnalytics, CanViewPlatformAnalytics
+from apps.analytics.permissions import CanViewPlatformAnalytics, CanViewSellerAnalytics
 from apps.orders.models import Order
 from apps.payments.models import Payment
 from apps.returns.models import ReturnRequest
-from .models import ItemAllocation, ConfirmedRefund, SellerLedgerEntry
+
+from .models import ConfirmedRefund, SellerLedgerEntry
 
 
 def _safe_csv(value):

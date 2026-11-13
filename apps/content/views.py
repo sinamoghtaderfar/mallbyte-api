@@ -8,20 +8,28 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.content.models import (
-    Announcement, Banner, ContentPage, FAQCategory, FAQItem,
-    NavigationItem, NavigationMenu,
+    Announcement,
+    Banner,
+    ContentPage,
+    FAQCategory,
+    FAQItem,
+    NavigationItem,
+    NavigationMenu,
 )
-from apps.content.permissions import ContentPermission, EDIT, PUBLISH, VIEW
-from apps.content.permissions import content_has
+from apps.content.permissions import EDIT, PUBLISH, ContentPermission, content_has
 from apps.content.serializers import (
-    AnnouncementSerializer, BannerSerializer, ContentPageSerializer,
-    FAQCategorySerializer, FAQItemSerializer, NavigationItemSerializer,
+    AnnouncementSerializer,
+    BannerSerializer,
+    ContentPageSerializer,
+    FAQCategorySerializer,
+    FAQItemSerializer,
+    NavigationItemSerializer,
     NavigationMenuSerializer,
 )
 from apps.content.validators import validate_publication_window

@@ -1,14 +1,23 @@
 """Typed CMS contracts. All HTML-like text is untrusted and remains plain text."""
 from rest_framework import serializers
+
 from apps.content.models import (
-    Announcement, Banner, ContentPage, FAQCategory, FAQItem,
-    NavigationItem, NavigationMenu,
+    Announcement,
+    Banner,
+    ContentPage,
+    FAQCategory,
+    FAQItem,
+    NavigationItem,
+    NavigationMenu,
 )
 from apps.content.validators import (
-    reject_direct_publication, validate_image_upload, validate_link,
-    validate_plain_text, validate_publication_window,
+    reject_direct_publication,
+    validate_image_upload,
+    validate_link,
+    validate_plain_text,
+    validate_publication_window,
 )
-from apps.content.visibility import visible_nav_items, can_view_unpublished
+from apps.content.visibility import can_view_unpublished, visible_nav_items
 
 
 class PublicationSerializerMixin:

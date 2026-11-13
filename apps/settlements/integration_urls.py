@@ -2,8 +2,8 @@ from django.urls import path
 
 from apps.settlements.gateway_bridge import (
     CaptureConfirmationView,
-    RefundConfirmationView,
     PayoutConfirmationView,
+    RefundConfirmationView,
 )
 
 urlpatterns = [

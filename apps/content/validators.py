@@ -5,6 +5,7 @@ The frontend must render them as escaped text or sanitized Markdown.
 """
 import re
 from urllib.parse import urlsplit
+
 from rest_framework import serializers
 
 _HTML_TAG = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")

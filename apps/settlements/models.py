@@ -157,4 +157,4 @@ class ConfirmedPayout(models.Model):
             )
         ]
 
-from .monitoring_models import FinancialAuditRun, FinancialAuditAlert  # noqa: E402,F401
+from .monitoring_models import FinancialAuditAlert, FinancialAuditRun  # noqa: E402,F401

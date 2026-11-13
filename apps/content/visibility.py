@@ -1,6 +1,7 @@
 """Single filtering rule for public navigation and CMS draft viewers."""
 from django.db.models import Q
 from django.utils import timezone
+
 from apps.content.permissions import VIEW, content_has
 
 
